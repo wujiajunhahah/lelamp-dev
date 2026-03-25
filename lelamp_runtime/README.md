@@ -75,7 +75,11 @@ RESPEAKER_VARIANT=auto|v2|v1|skip
 最关键的是这几个：
 
 ```bash
-OPENAI_API_KEY=
+MODEL_PROVIDER=glm
+MODEL_API_KEY=
+MODEL_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+MODEL_NAME=glm-realtime
+MODEL_VOICE=tongtong
 LIVEKIT_URL=
 LIVEKIT_API_KEY=
 LIVEKIT_API_SECRET=
@@ -84,6 +88,12 @@ LELAMP_PORT=/dev/ttyACM0
 LELAMP_AUDIO_USER=pi
 LELAMP_LED_COUNT=40
 ```
+
+说明：
+
+- `MODEL_*` 是当前仓库的标准配置
+- `MODEL_PROVIDER=glm` 是默认路径
+- `ZAI_API_KEY` 和 `OPENAI_API_KEY` 仍然保留兼容回退，但不再是主配置键
 
 ## OpenClaw 该怎么理解
 

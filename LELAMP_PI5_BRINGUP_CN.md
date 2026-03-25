@@ -37,7 +37,12 @@
 ## 现在就能提前做的事
 
 1. 先准备账号和密钥。
-   你至少需要 `OPENAI_API_KEY`、`LIVEKIT_URL`、`LIVEKIT_API_KEY`、`LIVEKIT_API_SECRET`。
+   你至少需要 `MODEL_API_KEY`、`LIVEKIT_URL`、`LIVEKIT_API_KEY`、`LIVEKIT_API_SECRET`。
+   如果你打算默认走智谱，推荐直接准备：
+   `MODEL_PROVIDER=glm`
+   `MODEL_BASE_URL=https://open.bigmodel.cn/api/paas/v4`
+   `MODEL_NAME=glm-realtime`
+   `MODEL_VOICE=tongtong`
 2. 把 3D 件和五个舵机贴好标签。
    舵机 ID 对应关系是 `base_yaw=1`、`base_pitch=2`、`elbow_pitch=3`、`wrist_roll=4`、`wrist_pitch=5`。
 3. 把这几个文件先看一遍。
@@ -70,7 +75,7 @@ chmod +x scripts/pi5_all_in_one.sh
 ./scripts/pi5_all_in_one.sh
 ```
 
-5. 如果密钥还没提前放进 `.pi5_zero_touch.env`，编辑 `.env`，填入 OpenAI 和 LiveKit 密钥。
+5. 如果密钥还没提前放进 `.pi5_zero_touch.env`，编辑 `.env`，填入 `MODEL_*` 和 `LIVEKIT_*` 密钥。
 6. 重启树莓派。
 7. 重启后先确认音频帽子被系统识别：
 

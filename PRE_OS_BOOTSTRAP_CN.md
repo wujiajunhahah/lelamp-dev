@@ -46,6 +46,14 @@ set +a
 ./host_tools/pi5_zero_touch_seed.sh --bootfs "$BOOTFS_PATH" --password "$BOOTSTRAP_PASSWORD"
 ```
 
+`.pi5_zero_touch.env` 里现在推荐直接放：
+
+- `MODEL_PROVIDER=glm`
+- `MODEL_API_KEY=...`
+- `MODEL_BASE_URL=https://open.bigmodel.cn/api/paas/v4`
+- `MODEL_NAME=glm-realtime`
+- `MODEL_VOICE=tongtong`
+
 ## 官方认可的两条路
 
 ### 路线 A：另一台电脑 + Raspberry Pi Imager

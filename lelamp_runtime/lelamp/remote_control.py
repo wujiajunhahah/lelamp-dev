@@ -23,6 +23,10 @@ def _handle_show_config(args) -> int:
         "lamp_id": args.id,
         "port": args.port,
         "fps": args.fps,
+        "model_provider": args.model_provider,
+        "model_base_url": args.model_base_url,
+        "model_name": args.model_name,
+        "model_voice": args.model_voice,
         "led_count": args.led_count,
         "led_pin": args.led_pin,
         "audio_user": args.audio_user,
@@ -87,6 +91,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", default=settings.port, help="Serial port for the lamp")
     parser.add_argument("--fps", type=int, default=settings.fps, help="Motor playback FPS")
     parser.add_argument("--audio-user", default=settings.audio_user, help="Current audio control user")
+    parser.add_argument("--model-provider", default=settings.model_provider, help="Realtime model provider")
+    parser.add_argument("--model-base-url", default=settings.model_base_url, help="Realtime model base URL")
+    parser.add_argument("--model-name", default=settings.model_name, help="Realtime model name")
+    parser.add_argument("--model-voice", default=settings.model_voice, help="Realtime voice name")
     parser.add_argument("--led-count", type=int, default=settings.led_count, help="LED count")
     parser.add_argument("--led-pin", type=int, default=settings.led_pin, help="LED GPIO pin")
     parser.add_argument("--led-freq-hz", type=int, default=settings.led_freq_hz, help="LED frequency")

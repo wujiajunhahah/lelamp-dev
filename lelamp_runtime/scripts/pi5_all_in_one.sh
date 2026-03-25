@@ -22,7 +22,11 @@ OPENCLAW_INSTALL_MODE_WAS_SET="${OPENCLAW_INSTALL_MODE+x}"
 INSTALL_TAILSCALE_WAS_SET="${INSTALL_TAILSCALE+x}"
 RUN_OPENCLAW_ONBOARD_WAS_SET="${RUN_OPENCLAW_ONBOARD+x}"
 RUN_DOWNLOAD_FILES_POSTBOOT_WAS_SET="${RUN_DOWNLOAD_FILES_POSTBOOT+x}"
-OPENAI_API_KEY_WAS_SET="${OPENAI_API_KEY+x}"
+MODEL_PROVIDER_WAS_SET="${MODEL_PROVIDER+x}"
+MODEL_API_KEY_WAS_SET="${MODEL_API_KEY+x}"
+MODEL_BASE_URL_WAS_SET="${MODEL_BASE_URL+x}"
+MODEL_NAME_WAS_SET="${MODEL_NAME+x}"
+MODEL_VOICE_WAS_SET="${MODEL_VOICE+x}"
 LIVEKIT_URL_WAS_SET="${LIVEKIT_URL+x}"
 LIVEKIT_API_KEY_WAS_SET="${LIVEKIT_API_KEY+x}"
 LIVEKIT_API_SECRET_WAS_SET="${LIVEKIT_API_SECRET+x}"
@@ -39,7 +43,11 @@ INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-auto}"
 RUN_OPENCLAW_ONBOARD="${RUN_OPENCLAW_ONBOARD:-auto}"
 RUN_DOWNLOAD_FILES_POSTBOOT="${RUN_DOWNLOAD_FILES_POSTBOOT:-1}"
 
-OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+MODEL_PROVIDER="${MODEL_PROVIDER:-glm}"
+MODEL_API_KEY="${MODEL_API_KEY:-${ZAI_API_KEY:-${OPENAI_API_KEY:-}}}"
+MODEL_BASE_URL="${MODEL_BASE_URL:-}"
+MODEL_NAME="${MODEL_NAME:-}"
+MODEL_VOICE="${MODEL_VOICE:-}"
 LIVEKIT_URL="${LIVEKIT_URL:-}"
 LIVEKIT_API_KEY="${LIVEKIT_API_KEY:-}"
 LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET:-}"
@@ -159,6 +167,59 @@ command_present() {
   command -v "$1" >/dev/null 2>&1
 }
 
+normalize_model_provider() {
+  case "${MODEL_PROVIDER,,}" in
+    glm|zhipu|bigmodel|z.ai)
+      MODEL_PROVIDER="glm"
+      ;;
+    "")
+      MODEL_PROVIDER="glm"
+      ;;
+    *)
+      MODEL_PROVIDER="${MODEL_PROVIDER,,}"
+      ;;
+  esac
+}
+
+default_model_base_url() {
+  case "$1" in
+    glm) printf '%s' "https://open.bigmodel.cn/api/paas/v4" ;;
+    openai) printf '%s' "https://api.openai.com/v1" ;;
+    *) printf '%s' "" ;;
+  esac
+}
+
+default_model_name() {
+  case "$1" in
+    glm) printf '%s' "glm-realtime" ;;
+    *) printf '%s' "" ;;
+  esac
+}
+
+default_model_voice() {
+  case "$1" in
+    glm) printf '%s' "tongtong" ;;
+    openai) printf '%s' "ballad" ;;
+    *) printf '%s' "tongtong" ;;
+  esac
+}
+
+apply_model_provider_defaults() {
+  normalize_model_provider
+
+  if ! was_explicitly_set MODEL_BASE_URL && [[ -z "$MODEL_BASE_URL" ]]; then
+    MODEL_BASE_URL="$(default_model_base_url "$MODEL_PROVIDER")"
+  fi
+
+  if ! was_explicitly_set MODEL_NAME && [[ -z "$MODEL_NAME" ]]; then
+    MODEL_NAME="$(default_model_name "$MODEL_PROVIDER")"
+  fi
+
+  if ! was_explicitly_set MODEL_VOICE && [[ -z "$MODEL_VOICE" ]]; then
+    MODEL_VOICE="$(default_model_voice "$MODEL_PROVIDER")"
+  fi
+}
+
 service_is_enabled() {
   local service_name="$1"
 
@@ -182,9 +243,43 @@ load_existing_env_defaults() {
     LAMP_PORT="$existing_value"
   fi
 
-  existing_value="$(read_env_value OPENAI_API_KEY)"
-  if ! was_explicitly_set OPENAI_API_KEY && [[ -z "$OPENAI_API_KEY" && -n "$existing_value" ]]; then
-    OPENAI_API_KEY="$existing_value"
+  existing_value="$(read_env_value MODEL_PROVIDER)"
+  if ! was_explicitly_set MODEL_PROVIDER && [[ -n "$existing_value" ]]; then
+    MODEL_PROVIDER="$existing_value"
+  fi
+
+  existing_value="$(read_env_value MODEL_API_KEY)"
+  if ! was_explicitly_set MODEL_API_KEY && [[ -z "$MODEL_API_KEY" && -n "$existing_value" ]]; then
+    MODEL_API_KEY="$existing_value"
+  fi
+
+  if ! was_explicitly_set MODEL_API_KEY && [[ -z "$MODEL_API_KEY" ]]; then
+    existing_value="$(read_env_value ZAI_API_KEY)"
+    if [[ -n "$existing_value" ]]; then
+      MODEL_API_KEY="$existing_value"
+    fi
+  fi
+
+  if ! was_explicitly_set MODEL_API_KEY && [[ -z "$MODEL_API_KEY" ]]; then
+    existing_value="$(read_env_value OPENAI_API_KEY)"
+    if [[ -n "$existing_value" ]]; then
+      MODEL_API_KEY="$existing_value"
+    fi
+  fi
+
+  existing_value="$(read_env_value MODEL_BASE_URL)"
+  if ! was_explicitly_set MODEL_BASE_URL && [[ -n "$existing_value" ]]; then
+    MODEL_BASE_URL="$existing_value"
+  fi
+
+  existing_value="$(read_env_value MODEL_NAME)"
+  if ! was_explicitly_set MODEL_NAME && [[ -n "$existing_value" ]]; then
+    MODEL_NAME="$existing_value"
+  fi
+
+  existing_value="$(read_env_value MODEL_VOICE)"
+  if ! was_explicitly_set MODEL_VOICE && [[ -n "$existing_value" ]]; then
+    MODEL_VOICE="$existing_value"
   fi
 
   existing_value="$(read_env_value LIVEKIT_URL)"
@@ -262,6 +357,10 @@ print_detection_summary() {
   printf '  LAMP_ID=%s\n' "$LAMP_ID"
   printf '  LAMP_PORT=%s\n' "$LAMP_PORT"
   printf '  MODE_SCRIPT=%s\n' "$MODE_SCRIPT"
+  printf '  MODEL_PROVIDER=%s\n' "$MODEL_PROVIDER"
+  printf '  MODEL_BASE_URL=%s\n' "$MODEL_BASE_URL"
+  printf '  MODEL_NAME=%s\n' "$MODEL_NAME"
+  printf '  MODEL_VOICE=%s\n' "$MODEL_VOICE"
   printf '  RESPEAKER_VARIANT=%s\n' "$RESPEAKER_VARIANT"
   printf '  INSTALL_LELAMP_SERVICE=%s\n' "$INSTALL_LELAMP_SERVICE"
   printf '  INSTALL_OPENCLAW=%s\n' "$INSTALL_OPENCLAW"
@@ -288,7 +387,7 @@ ensure_pi_profile() {
 }
 
 has_all_voice_secrets() {
-  [[ -n "$OPENAI_API_KEY" && -n "$LIVEKIT_URL" && -n "$LIVEKIT_API_KEY" && -n "$LIVEKIT_API_SECRET" ]]
+  [[ -n "$MODEL_API_KEY" && -n "$LIVEKIT_URL" && -n "$LIVEKIT_API_KEY" && -n "$LIVEKIT_API_SECRET" ]]
 }
 
 install_post_boot_service() {
@@ -324,6 +423,7 @@ log "Detected OS codename: ${OS_CODENAME}"
 
 ensure_pi_profile
 load_existing_env_defaults
+apply_model_provider_defaults
 detect_servo_port
 resolve_auto_defaults
 print_detection_summary
@@ -331,6 +431,11 @@ print_detection_summary
 prompt_default LAMP_ID "Lamp ID" "$LAMP_ID"
 prompt_default LAMP_PORT "Servo serial port" "$LAMP_PORT"
 prompt_default MODE_SCRIPT "Runtime mode script (smooth_animation.py or main.py)" "$MODE_SCRIPT"
+prompt_default MODEL_PROVIDER "Realtime model provider (glm, openai, custom)" "$MODEL_PROVIDER"
+apply_model_provider_defaults
+prompt_default MODEL_BASE_URL "Realtime model base URL" "$MODEL_BASE_URL"
+prompt_default MODEL_NAME "Realtime model name" "$MODEL_NAME"
+prompt_default MODEL_VOICE "Realtime voice name" "$MODEL_VOICE"
 prompt_default RESPEAKER_VARIANT "ReSpeaker variant (auto, v2, v1, skip)" "$RESPEAKER_VARIANT"
 
 prompt_yes_no INSTALL_LELAMP_SERVICE "Install and enable LeLamp boot service" "$INSTALL_LELAMP_SERVICE"
@@ -342,10 +447,10 @@ if [[ "$INSTALL_OPENCLAW" == "1" ]]; then
   prompt_yes_no RUN_OPENCLAW_ONBOARD "Run OpenClaw onboarding now" "$RUN_OPENCLAW_ONBOARD"
 fi
 
-prompt_yes_no RUN_DOWNLOAD_FILES_POSTBOOT "Run LiveKit/OpenAI download step automatically after reboot" "$RUN_DOWNLOAD_FILES_POSTBOOT"
+prompt_yes_no RUN_DOWNLOAD_FILES_POSTBOOT "Run LiveKit/model download step automatically after reboot" "$RUN_DOWNLOAD_FILES_POSTBOOT"
 prompt_yes_no AUTO_REBOOT "Reboot automatically at the end of setup" "$AUTO_REBOOT"
 
-prompt_secret OPENAI_API_KEY "OpenAI API key (leave blank to fill later)"
+prompt_secret MODEL_API_KEY "Realtime model API key (leave blank to fill later)"
 prompt_secret LIVEKIT_URL "LiveKit URL (leave blank to fill later)"
 prompt_secret LIVEKIT_API_KEY "LiveKit API key (leave blank to fill later)"
 prompt_secret LIVEKIT_API_SECRET "LiveKit API secret (leave blank to fill later)"
@@ -358,14 +463,18 @@ upsert_env "LELAMP_ID" "$LAMP_ID"
 upsert_env "LELAMP_PORT" "$LAMP_PORT"
 upsert_env "LELAMP_AUDIO_USER" "$USER"
 
-if [[ -n "$OPENAI_API_KEY" ]]; then upsert_env "OPENAI_API_KEY" "$OPENAI_API_KEY"; fi
+upsert_env "MODEL_PROVIDER" "$MODEL_PROVIDER"
+if [[ -n "$MODEL_API_KEY" ]]; then upsert_env "MODEL_API_KEY" "$MODEL_API_KEY"; fi
+if [[ -n "$MODEL_BASE_URL" ]]; then upsert_env "MODEL_BASE_URL" "$MODEL_BASE_URL"; fi
+if [[ -n "$MODEL_NAME" ]]; then upsert_env "MODEL_NAME" "$MODEL_NAME"; fi
+if [[ -n "$MODEL_VOICE" ]]; then upsert_env "MODEL_VOICE" "$MODEL_VOICE"; fi
 if [[ -n "$LIVEKIT_URL" ]]; then upsert_env "LIVEKIT_URL" "$LIVEKIT_URL"; fi
 if [[ -n "$LIVEKIT_API_KEY" ]]; then upsert_env "LIVEKIT_API_KEY" "$LIVEKIT_API_KEY"; fi
 if [[ -n "$LIVEKIT_API_SECRET" ]]; then upsert_env "LIVEKIT_API_SECRET" "$LIVEKIT_API_SECRET"; fi
 
 resolved_install_service="$INSTALL_LELAMP_SERVICE"
 if [[ "$INSTALL_LELAMP_SERVICE" == "1" ]] && ! has_all_voice_secrets; then
-  log "Voice service secrets are incomplete, so the LeLamp boot service will not be enabled yet."
+  log "Realtime model or LiveKit secrets are incomplete, so the LeLamp boot service will not be enabled yet."
   resolved_install_service="0"
 fi
 
@@ -407,6 +516,10 @@ Repo root: ${REPO_ROOT}
 Lamp ID: ${LAMP_ID}
 Servo port: ${LAMP_PORT}
 Mode script: ${MODE_SCRIPT}
+Realtime provider: ${MODEL_PROVIDER}
+Realtime base URL: ${MODEL_BASE_URL}
+Realtime model: ${MODEL_NAME}
+Realtime voice: ${MODEL_VOICE}
 ReSpeaker path: ${RESPEAKER_VARIANT}
 OpenClaw installed: ${INSTALL_OPENCLAW}
 LeLamp boot service enabled now: ${resolved_install_service}

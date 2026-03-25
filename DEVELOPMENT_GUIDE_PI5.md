@@ -75,7 +75,7 @@
 2. 拒绝错误平台，除非显式允许
 3. 自动检测已有 `.env`、串口、service、OpenClaw
 4. 收集安装变量
-5. 写入 `.env`
+5. 写入 `.env`，统一走 `MODEL_*` 运行时模型配置
 6. 调用 `pi_setup_max.sh`
 7. 可选调用 `openclaw_pi5_setup.sh`
 8. 安装 LeLamp OpenClaw skill
@@ -127,6 +127,30 @@ OpenClaw 在这里不是：
 - `clear`
 
 不要把 `setup_motors`、`calibrate`、`record` 直接交给 OpenClaw 自动执行，除非你明确知道后果。
+
+## 模型提供商策略
+
+当前仓库已经收成 provider-agnostic 结构：
+
+- `MODEL_PROVIDER`
+- `MODEL_API_KEY`
+- `MODEL_BASE_URL`
+- `MODEL_NAME`
+- `MODEL_VOICE`
+
+默认值是 `GLM Realtime`：
+
+- provider: `glm`
+- base URL: `https://open.bigmodel.cn/api/paas/v4`
+- model: `glm-realtime`
+- voice: `tongtong`
+
+兼容回退仍然保留：
+
+- `ZAI_API_KEY`
+- `OPENAI_API_KEY`
+
+但运行时不再以 `OPENAI_API_KEY` 作为主键。
 
 ## GitHub Pages
 

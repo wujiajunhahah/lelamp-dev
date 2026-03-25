@@ -47,6 +47,11 @@ OpenClaw 官方当前文档里，树莓派上常见的是这几类：
 
 1. `LeLamp Runtime`
    直接负责舵机、LED、音频和语音 agent。
+   当前默认模型路径已经切到 `GLM Realtime`：
+   `MODEL_PROVIDER=glm`
+   `MODEL_BASE_URL=https://open.bigmodel.cn/api/paas/v4`
+   `MODEL_NAME=glm-realtime`
+   `MODEL_VOICE=tongtong`
 2. `OpenClaw`
    负责消息入口、远程访问和手机控制。
 3. `Telegram`
@@ -99,9 +104,21 @@ chmod +x scripts/install_openclaw_skill.sh
 ## 我建议你 onboarding 时怎么选
 
 1. 模式先选 `Local`
-2. 把 API keys 配好
-3. 远程入口先加 `Telegram`
-4. 如果你要从外网看 dashboard，再配 `Tailscale`
+2. 模型优先接 `GLM Coding Plan` 路线
+   推荐把 OpenClaw 侧单独配成：
+   provider: `Z.AI / GLM`
+   model: `glm-5` 或 `glm-4.7`
+   base URL: `https://open.bigmodel.cn/api/coding/paas/v4`
+3. 把 API keys 配好
+4. 远程入口先加 `Telegram`
+5. 如果你要从外网看 dashboard，再配 `Tailscale`
+
+注意分层：
+
+- `LeLamp Runtime` 这层默认用 `GLM Realtime`
+- `OpenClaw` 这层更适合走智谱官方给 OpenClaw 准备的 `Coding Plan` 路线
+
+两层不是同一个 endpoint，也不应该共用同一套默认参数
 
 ## 远程访问也有几条官方路子
 

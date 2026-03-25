@@ -30,7 +30,7 @@ Pages 的职责是：
 
 - 缺了什么命令
 - 已经安装了什么
-- `.env` 里哪些关键项已经有了
+- `.env` 里哪些 `MODEL_*` / `LIVEKIT_*` 关键项已经有了
 - 音频设备、串口设备是否出现
 - `systemd` 服务是否安装 / 启用
 - OpenClaw skill 是否在位
@@ -57,6 +57,14 @@ cd ~/lelamp_runtime
 - `Pi Camera`
 - `speaker + microphone`
 - `LeLamp 3D prints`
+
+当前默认软件模型路径也已经收成：
+
+- `MODEL_PROVIDER=glm`
+- `MODEL_BASE_URL=https://open.bigmodel.cn/api/paas/v4`
+- `MODEL_NAME=glm-realtime`
+- `MODEL_VOICE=tongtong`
+- `MODEL_API_KEY=<your GLM key>`
 
 重要修正：
 
@@ -114,6 +122,11 @@ AUTO_ACCEPT_DEFAULTS=1 \
 AUTO_REBOOT=1 \
 LAMP_ID=lelamp \
 LAMP_PORT=/dev/ttyACM0 \
+MODEL_PROVIDER=glm \
+MODEL_API_KEY=your_glm_key \
+MODEL_BASE_URL=https://open.bigmodel.cn/api/paas/v4 \
+MODEL_NAME=glm-realtime \
+MODEL_VOICE=tongtong \
 RESPEAKER_VARIANT=auto \
 INSTALL_OPENCLAW=1 \
 OPENCLAW_INSTALL_MODE=standard \
@@ -127,7 +140,7 @@ OPENCLAW_INSTALL_MODE=standard \
 1. 检测 `Pi 型号 / OS / 架构`
 2. 检测你是不是在 `Pi 5` 路线
 3. 自动判断已有 `.env`、`/dev/ttyACM*`、已装 service、已装 OpenClaw
-4. 写入 `.env`
+4. 写入 `.env`，统一使用 `MODEL_*` + `LIVEKIT_*` 配置
 5. 调用 [pi_setup_max.sh](./lelamp_runtime/scripts/pi_setup_max.sh) 配好 LeLamp runtime
 6. 按安全策略处理 `ReSpeaker`
 7. 安装可选的 `LeLamp` 开机服务

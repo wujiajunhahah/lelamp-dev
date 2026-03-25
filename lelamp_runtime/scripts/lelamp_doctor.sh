@@ -82,6 +82,22 @@ check_env_key() {
   fi
 }
 
+check_optional_env_key() {
+  local key="$1"
+  if [[ ! -f "$ENV_FILE" ]]; then
+    warn ".env file is missing; cannot verify ${key}"
+    return
+  fi
+
+  local value
+  value="$(grep -E "^${key}=" "$ENV_FILE" | tail -n 1 | cut -d= -f2- || true)"
+  if [[ -n "$value" ]]; then
+    ok ".env ${key}: present"
+  else
+    warn ".env ${key}: missing"
+  fi
+}
+
 service_state() {
   local service_name="$1"
 
@@ -146,7 +162,13 @@ check_file "${REPO_ROOT}/scripts/lelamp_doctor.sh" "doctor script"
 check_optional_file "${ENV_FILE}" ".env"
 
 header "Environment"
-check_env_key OPENAI_API_KEY
+check_env_key MODEL_PROVIDER
+check_env_key MODEL_API_KEY
+check_env_key MODEL_BASE_URL
+check_env_key MODEL_NAME
+check_env_key MODEL_VOICE
+check_optional_env_key ZAI_API_KEY
+check_optional_env_key OPENAI_API_KEY
 check_env_key LIVEKIT_URL
 check_env_key LIVEKIT_API_KEY
 check_env_key LIVEKIT_API_SECRET

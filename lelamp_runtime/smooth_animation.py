@@ -1,20 +1,22 @@
 from dotenv import load_dotenv
-import argparse
 import subprocess
 
-from livekit import agents, api, rtc
+from livekit import agents
 from livekit.agents import (
     AgentSession, 
     Agent, 
     RoomInputOptions,
     function_tool
 )
-import logging
 from livekit.plugins import (
     openai,
     noise_cancellation,
 )
-from lelamp.runtime_config import RuntimeSettings, load_runtime_settings
+from lelamp.runtime_config import (
+    RuntimeSettings,
+    build_realtime_model_config,
+    load_runtime_settings,
+)
 from lelamp.service.motors.animation_service import AnimationService
 from lelamp.service.rgb.rgb_service import RGBService
 
@@ -236,9 +238,7 @@ async def entrypoint(ctx: agents.JobContext):
     agent = LeLamp(settings=load_runtime_settings())
     
     session = AgentSession(
-        llm=openai.realtime.RealtimeModel(
-            voice="ballad" 
-        )
+        llm=openai.realtime.RealtimeModel(**build_realtime_model_config(agent.settings))
     )
 
     await session.start(

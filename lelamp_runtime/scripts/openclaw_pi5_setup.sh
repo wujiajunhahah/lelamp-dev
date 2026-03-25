@@ -86,8 +86,11 @@ cat <<'EOF'
 
 Recommended next steps:
 1. Run 'openclaw onboard --install-daemon' if you did not set RUN_ONBOARD=1.
-2. During onboarding, choose Local mode for this Pi and add your API keys.
-3. If you want phone-first control, add Telegram first. It is the lightest remote path.
-4. Verify with 'openclaw doctor' and 'openclaw status'.
-5. Optionally install Tailscale for private dashboard access instead of exposing ports publicly.
+2. During onboarding, choose Local mode for this Pi.
+3. If you use GLM for OpenClaw, prefer the Z.AI / Coding Plan route with base URL:
+   https://open.bigmodel.cn/api/coding/paas/v4
+4. For OpenClaw model selection, start with glm-4.7 or glm-5 according to your quota.
+5. If you want phone-first control, add Telegram first. It is the lightest remote path.
+6. Verify with 'openclaw doctor' and 'openclaw status'.
+7. Optionally install Tailscale for private dashboard access instead of exposing ports publicly.
 EOF

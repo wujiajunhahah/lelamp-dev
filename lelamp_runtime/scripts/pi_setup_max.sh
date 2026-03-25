@@ -196,7 +196,7 @@ cat <<EOF
 
 Next steps:
 1. Reboot the Pi so the ReSpeaker overlay is loaded.
-2. Fill in ${REPO_ROOT}/.env with OPENAI and LiveKit secrets.
+2. Fill in ${REPO_ROOT}/.env with MODEL and LiveKit secrets.
 3. Confirm 'aplay -l' shows the expected audio device before going further.
 4. Run '${UV_BIN} run ${MODE_SCRIPT} download-files' once after networking is ready.
 5. Verify audio with '${UV_BIN} run -m lelamp.test.test_audio' if audio was configured.
