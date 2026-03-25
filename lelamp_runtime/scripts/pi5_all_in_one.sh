@@ -12,16 +12,31 @@ AUTO_ACCEPT_DEFAULTS="${AUTO_ACCEPT_DEFAULTS:-0}"
 AUTO_REBOOT="${AUTO_REBOOT:-0}"
 ALLOW_NON_PI5="${ALLOW_NON_PI5:-0}"
 
+LAMP_ID_WAS_SET="${LAMP_ID+x}"
+LAMP_PORT_WAS_SET="${LAMP_PORT+x}"
+MODE_SCRIPT_WAS_SET="${MODE_SCRIPT+x}"
+RESPEAKER_VARIANT_WAS_SET="${RESPEAKER_VARIANT+x}"
+INSTALL_LELAMP_SERVICE_WAS_SET="${INSTALL_LELAMP_SERVICE+x}"
+INSTALL_OPENCLAW_WAS_SET="${INSTALL_OPENCLAW+x}"
+OPENCLAW_INSTALL_MODE_WAS_SET="${OPENCLAW_INSTALL_MODE+x}"
+INSTALL_TAILSCALE_WAS_SET="${INSTALL_TAILSCALE+x}"
+RUN_OPENCLAW_ONBOARD_WAS_SET="${RUN_OPENCLAW_ONBOARD+x}"
+RUN_DOWNLOAD_FILES_POSTBOOT_WAS_SET="${RUN_DOWNLOAD_FILES_POSTBOOT+x}"
+OPENAI_API_KEY_WAS_SET="${OPENAI_API_KEY+x}"
+LIVEKIT_URL_WAS_SET="${LIVEKIT_URL+x}"
+LIVEKIT_API_KEY_WAS_SET="${LIVEKIT_API_KEY+x}"
+LIVEKIT_API_SECRET_WAS_SET="${LIVEKIT_API_SECRET+x}"
+
 LAMP_ID="${LAMP_ID:-lelamp}"
-LAMP_PORT="${LAMP_PORT:-/dev/ttyACM0}"
+LAMP_PORT="${LAMP_PORT:-auto}"
 MODE_SCRIPT="${MODE_SCRIPT:-smooth_animation.py}"
 RESPEAKER_VARIANT="${RESPEAKER_VARIANT:-auto}"
 
-INSTALL_LELAMP_SERVICE="${INSTALL_LELAMP_SERVICE:-1}"
-INSTALL_OPENCLAW="${INSTALL_OPENCLAW:-1}"
+INSTALL_LELAMP_SERVICE="${INSTALL_LELAMP_SERVICE:-auto}"
+INSTALL_OPENCLAW="${INSTALL_OPENCLAW:-auto}"
 OPENCLAW_INSTALL_MODE="${OPENCLAW_INSTALL_MODE:-standard}"
-INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-0}"
-RUN_OPENCLAW_ONBOARD="${RUN_OPENCLAW_ONBOARD:-0}"
+INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-auto}"
+RUN_OPENCLAW_ONBOARD="${RUN_OPENCLAW_ONBOARD:-auto}"
 RUN_DOWNLOAD_FILES_POSTBOOT="${RUN_DOWNLOAD_FILES_POSTBOOT:-1}"
 
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
@@ -40,13 +55,28 @@ log() {
   printf '\n==> %s\n' "$*"
 }
 
+was_explicitly_set() {
+  local flag_name="${1}_WAS_SET"
+  [[ -n "${!flag_name:-}" ]]
+}
+
+read_env_value() {
+  local key="$1"
+
+  if [[ ! -f "$ENV_FILE" ]]; then
+    return 0
+  fi
+
+  grep -E "^${key}=" "$ENV_FILE" | tail -n 1 | cut -d= -f2- || true
+}
+
 prompt_default() {
   local var_name="$1"
   local prompt_text="$2"
   local default_value="$3"
   local response
 
-  if [[ -n "${!var_name:-}" ]]; then
+  if was_explicitly_set "$var_name"; then
     return
   fi
 
@@ -65,7 +95,7 @@ prompt_yes_no() {
   local default_value="$3"
   local response
 
-  if [[ "${!var_name:-}" == "0" || "${!var_name:-}" == "1" ]]; then
+  if was_explicitly_set "$var_name" && [[ "${!var_name:-}" == "0" || "${!var_name:-}" == "1" ]]; then
     return
   fi
 
@@ -114,12 +144,134 @@ prompt_secret() {
 upsert_env() {
   local key="$1"
   local value="$2"
+  local escaped_value
+
+  escaped_value="$(printf '%s' "$value" | sed 's/[&|]/\\&/g')"
 
   if grep -q "^${key}=" "$ENV_FILE"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+    sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$ENV_FILE"
   else
     printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
   fi
+}
+
+command_present() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+service_is_enabled() {
+  local service_name="$1"
+
+  if ! command_present systemctl; then
+    return 1
+  fi
+
+  systemctl is-enabled "$service_name" >/dev/null 2>&1
+}
+
+load_existing_env_defaults() {
+  local existing_value
+
+  existing_value="$(read_env_value LELAMP_ID)"
+  if ! was_explicitly_set LAMP_ID && [[ -n "$existing_value" ]]; then
+    LAMP_ID="$existing_value"
+  fi
+
+  existing_value="$(read_env_value LELAMP_PORT)"
+  if ! was_explicitly_set LAMP_PORT && [[ -n "$existing_value" ]]; then
+    LAMP_PORT="$existing_value"
+  fi
+
+  existing_value="$(read_env_value OPENAI_API_KEY)"
+  if ! was_explicitly_set OPENAI_API_KEY && [[ -z "$OPENAI_API_KEY" && -n "$existing_value" ]]; then
+    OPENAI_API_KEY="$existing_value"
+  fi
+
+  existing_value="$(read_env_value LIVEKIT_URL)"
+  if ! was_explicitly_set LIVEKIT_URL && [[ -z "$LIVEKIT_URL" && -n "$existing_value" ]]; then
+    LIVEKIT_URL="$existing_value"
+  fi
+
+  existing_value="$(read_env_value LIVEKIT_API_KEY)"
+  if ! was_explicitly_set LIVEKIT_API_KEY && [[ -z "$LIVEKIT_API_KEY" && -n "$existing_value" ]]; then
+    LIVEKIT_API_KEY="$existing_value"
+  fi
+
+  existing_value="$(read_env_value LIVEKIT_API_SECRET)"
+  if ! was_explicitly_set LIVEKIT_API_SECRET && [[ -z "$LIVEKIT_API_SECRET" && -n "$existing_value" ]]; then
+    LIVEKIT_API_SECRET="$existing_value"
+  fi
+}
+
+resolve_auto_defaults() {
+  if [[ "$INSTALL_LELAMP_SERVICE" == "auto" ]]; then
+    if service_is_enabled lelamp.service; then
+      INSTALL_LELAMP_SERVICE="0"
+    else
+      INSTALL_LELAMP_SERVICE="1"
+    fi
+  fi
+
+  if [[ "$INSTALL_OPENCLAW" == "auto" ]]; then
+    if command_present openclaw; then
+      INSTALL_OPENCLAW="0"
+    else
+      INSTALL_OPENCLAW="1"
+    fi
+  fi
+
+  if [[ "$INSTALL_TAILSCALE" == "auto" ]]; then
+    if command_present tailscale; then
+      INSTALL_TAILSCALE="0"
+    else
+      INSTALL_TAILSCALE="0"
+    fi
+  fi
+
+  if [[ "$RUN_OPENCLAW_ONBOARD" == "auto" ]]; then
+    RUN_OPENCLAW_ONBOARD="0"
+  fi
+}
+
+detect_servo_port() {
+  local devices=()
+
+  if compgen -G '/dev/ttyACM*' >/dev/null 2>&1; then
+    mapfile -t devices < <(printf '%s\n' /dev/ttyACM*)
+  fi
+
+  if [[ "$LAMP_PORT" == "auto" || -z "$LAMP_PORT" ]]; then
+    if [[ "${#devices[@]}" -gt 0 ]]; then
+      LAMP_PORT="${devices[0]}"
+      log "Auto-selected servo port: ${LAMP_PORT}"
+    else
+      LAMP_PORT="/dev/ttyACM0"
+      log "No ttyACM device detected yet; defaulting to ${LAMP_PORT}"
+    fi
+    return
+  fi
+
+  if [[ ! -e "$LAMP_PORT" && "${#devices[@]}" -eq 1 ]]; then
+    log "Requested servo port ${LAMP_PORT} not found; switching to detected device ${devices[0]}"
+    LAMP_PORT="${devices[0]}"
+  fi
+}
+
+print_detection_summary() {
+  printf '\nCurrent defaults after auto-detection:\n'
+  printf '  LAMP_ID=%s\n' "$LAMP_ID"
+  printf '  LAMP_PORT=%s\n' "$LAMP_PORT"
+  printf '  MODE_SCRIPT=%s\n' "$MODE_SCRIPT"
+  printf '  RESPEAKER_VARIANT=%s\n' "$RESPEAKER_VARIANT"
+  printf '  INSTALL_LELAMP_SERVICE=%s\n' "$INSTALL_LELAMP_SERVICE"
+  printf '  INSTALL_OPENCLAW=%s\n' "$INSTALL_OPENCLAW"
+  if [[ "$INSTALL_OPENCLAW" == "1" ]]; then
+    printf '  OPENCLAW_INSTALL_MODE=%s\n' "$OPENCLAW_INSTALL_MODE"
+    printf '  INSTALL_TAILSCALE=%s\n' "$INSTALL_TAILSCALE"
+    printf '  RUN_OPENCLAW_ONBOARD=%s\n' "$RUN_OPENCLAW_ONBOARD"
+  fi
+  printf '  RUN_DOWNLOAD_FILES_POSTBOOT=%s\n' "$RUN_DOWNLOAD_FILES_POSTBOOT"
+  printf '  AUTO_REBOOT=%s\n' "$AUTO_REBOOT"
 }
 
 ensure_pi_profile() {
@@ -171,6 +323,10 @@ log "Detected architecture: ${ARCH}"
 log "Detected OS codename: ${OS_CODENAME}"
 
 ensure_pi_profile
+load_existing_env_defaults
+detect_servo_port
+resolve_auto_defaults
+print_detection_summary
 
 prompt_default LAMP_ID "Lamp ID" "$LAMP_ID"
 prompt_default LAMP_PORT "Servo serial port" "$LAMP_PORT"
@@ -234,6 +390,14 @@ fi
 
 log "Installing post-reboot finalizer"
 install_post_boot_service
+
+if [[ -x "${REPO_ROOT}/scripts/lelamp_doctor.sh" ]]; then
+  log "Running doctor snapshot after staging"
+  (
+    cd "$REPO_ROOT"
+    ./scripts/lelamp_doctor.sh || true
+  )
+fi
 
 cat <<EOF
 

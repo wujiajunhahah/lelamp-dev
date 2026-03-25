@@ -42,6 +42,7 @@
    舵机 ID 对应关系是 `base_yaw=1`、`base_pitch=2`、`elbow_pitch=3`、`wrist_roll=4`、`wrist_pitch=5`。
 3. 把这几个文件先看一遍。
    `lelamp_runtime/.env.example`
+   `lelamp_runtime/scripts/lelamp_doctor.sh`
    `lelamp_runtime/scripts/pi_setup_max.sh`
    `lelamp_runtime/scripts/lelamp.service.example`
 4. 确认你打算给树莓派用什么用户名。
@@ -50,32 +51,42 @@
 ## 树莓派到手后的最短路径
 
 1. 用 Raspberry Pi Imager 刷 `Raspberry Pi OS Lite 64-bit`。
-   提前勾上 Wi-Fi、SSH、用户名和密码。
-2. 首次开机后 SSH 上去，把仓库放到 Pi 上。
-   推荐目录 `/home/<你的用户名>/lelamp_runtime`。
-3. 在 Pi 上进入仓库根目录，执行：
+2. 在你的 Mac 上直接给 boot 分区打种子：
 
 ```bash
-chmod +x scripts/pi_setup_max.sh
-./scripts/pi_setup_max.sh
+cp host_tools/pi5_zero_touch.env.example .pi5_zero_touch.env
+$EDITOR .pi5_zero_touch.env
+set -a
+source ./.pi5_zero_touch.env
+set +a
+./host_tools/pi5_zero_touch_seed.sh --bootfs "$BOOTFS_PATH" --password "$BOOTSTRAP_PASSWORD"
 ```
 
-4. 编辑 `.env`，填入 OpenAI 和 LiveKit 密钥。
-5. 重启树莓派。
-6. 重启后先确认音频帽子被系统识别：
+3. 把卡插到 Pi 5 里开机，等它自己执行首启自举。
+4. 如果你要手工重跑或补跑，再在 Pi 上进入仓库根目录执行：
+
+```bash
+chmod +x scripts/pi5_all_in_one.sh
+./scripts/pi5_all_in_one.sh
+```
+
+5. 如果密钥还没提前放进 `.pi5_zero_touch.env`，编辑 `.env`，填入 OpenAI 和 LiveKit 密钥。
+6. 重启树莓派。
+7. 重启后先确认音频帽子被系统识别：
 
 ```bash
 aplay -l
 arecord -l
 ```
 
-7. 然后再跑一次模型/资源下载：
+8. 然后再跑一次模型/资源下载：
 
 ```bash
 uv run smooth_animation.py download-files
 ```
 
-8. 按这个顺序验机：
+9. 按这个顺序验机：
+   `./scripts/lelamp_doctor.sh`
    `uv run -m lelamp.test.test_audio`
    `sudo uv run -m lelamp.test.test_rgb`
    `uv run lerobot-find-port`
@@ -83,7 +94,7 @@ uv run smooth_animation.py download-files
    `uv run -m lelamp.calibrate --id <lamp_id> --port <port>`
    `uv run -m lelamp.test.test_motors --id <lamp_id> --port <port>`
 
-9. 最后再启动语音 Agent：
+10. 最后再启动语音 Agent：
 
 ```bash
 uv run smooth_animation.py console
@@ -95,6 +106,7 @@ uv run smooth_animation.py console
 - LED 数量已经统一成 `40`，匹配你这套 `8x5 WS2812B Matrix`
 - 音量控制用户不再写死 `pi`
 - 额外补了 `.env.example`
+- 额外补了空白卡 bootfs 种子脚本
 - 额外补了 Pi 一键准备脚本
 - 额外补了 systemd 服务模板
 
@@ -113,6 +125,7 @@ uv run smooth_animation.py console
 
 ## 我建议你现场给我回传的第一批信息
 
+- `./scripts/lelamp_doctor.sh`
 - `aplay -l`
 - `arecord -l`
 - `uv run lerobot-find-port`

@@ -40,6 +40,7 @@
         <article class="card">
           <h2>核心脚本</h2>
           <ul>
+            <li><code>host_tools/pi5_zero_touch_seed.sh</code>: 空白卡 bootfs 种子入口</li>
             <li><code>scripts/pi5_all_in_one.sh</code>: 总控入口</li>
             <li><code>scripts/pi_setup_max.sh</code>: LeLamp runtime 与音频</li>
             <li><code>scripts/openclaw_pi5_setup.sh</code>: OpenClaw 安装</li>
@@ -75,8 +76,25 @@
       </section>
 
       <section class="card">
+        <h2>自动检测策略</h2>
+        <p>
+          `lelamp_runtime/scripts/lelamp_doctor.sh`
+          是当前缺失项检测入口。它负责判断：
+        </p>
+        <ul>
+          <li>哪些基础命令已经安装</li>
+          <li>哪些 `.env` 键存在</li>
+          <li>音频和串口设备有没有出现</li>
+          <li>LeLamp 和 post-boot 服务状态</li>
+          <li>zero-touch bootstrap 服务和完成标记</li>
+          <li>OpenClaw skill 是否就位</li>
+        </ul>
+      </section>
+
+      <section class="card">
         <h2>推荐验证命令</h2>
-        <pre><code>bash -n lelamp_runtime/scripts/pi_setup_max.sh
+        <pre><code>bash -n host_tools/pi5_zero_touch_seed.sh
+bash -n lelamp_runtime/scripts/pi_setup_max.sh
 bash -n lelamp_runtime/scripts/openclaw_pi5_setup.sh
 bash -n lelamp_runtime/scripts/install_openclaw_skill.sh
 bash -n lelamp_runtime/scripts/pi5_all_in_one.sh

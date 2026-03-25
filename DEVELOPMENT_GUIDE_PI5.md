@@ -36,6 +36,8 @@
   当前这份维护文档。
 - `site/`
   GitHub Pages 静态站点源文件。
+- `host_tools/`
+  宿主机侧 pre-OS 辅助脚本和 bootfs 种子脚本。
 
 ### `lelamp_runtime/`
 
@@ -56,19 +58,30 @@
 - `openclaw/skills/lelamp-control/SKILL.md`
   OpenClaw 的 LeLamp 技能定义。
 
+### `host_tools/`
+
+- `pi5_preos_check_macos.sh`
+  在 Mac 上检查你有没有准备好官方刷卡路径。
+- `pi5_zero_touch_seed.sh`
+  把 `userconf.txt`、`ssh`、`firstrun.sh` 和 `lelamp-bootstrap.service` 的首启自举链写进 bootfs。
+- `pi5_zero_touch.env.example`
+  给 `pi5_zero_touch_seed.sh` 使用的环境模板。
+
 ## 一键入口的执行顺序
 
 `pi5_all_in_one.sh` 负责：
 
 1. 识别 Pi 型号、架构、OS codename
 2. 拒绝错误平台，除非显式允许
-3. 收集安装变量
-4. 写入 `.env`
-5. 调用 `pi_setup_max.sh`
-6. 可选调用 `openclaw_pi5_setup.sh`
-7. 安装 LeLamp OpenClaw skill
-8. 安装 one-shot post-boot finalizer
-9. 引导用户重启
+3. 自动检测已有 `.env`、串口、service、OpenClaw
+4. 收集安装变量
+5. 写入 `.env`
+6. 调用 `pi_setup_max.sh`
+7. 可选调用 `openclaw_pi5_setup.sh`
+8. 安装 LeLamp OpenClaw skill
+9. 安装 one-shot post-boot finalizer
+10. 跑一遍 `doctor` 快照
+11. 引导用户重启
 
 ## 音频策略
 
@@ -127,10 +140,16 @@ OpenClaw 在这里不是：
 
 - `.github/workflows/pages.yml`
 
+当前 workflow 还额外设置了：
+
+- `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`
+
+这是为了提前避开 GitHub Actions 的 Node 20 废弃告警。
+
 站点职责：
 
 - 对外解释仓库的目标和硬件画像
-- 给到 Pi 5 一键安装入口
+- 给到 `stage-0 bootfs 种子` 和 `stage-1 Pi installer` 两个入口
 - 给到开发者入口和维护说明
 
 站点不是文档生成器，不做复杂构建，保持纯静态。
@@ -148,6 +167,9 @@ OpenClaw 在这里不是：
 ## 建议的验证命令
 
 ```bash
+bash -n host_tools/pi5_preos_check_macos.sh
+bash -n host_tools/pi5_zero_touch_seed.sh
+bash -n lelamp_runtime/scripts/lelamp_doctor.sh
 bash -n lelamp_runtime/scripts/pi_setup_max.sh
 bash -n lelamp_runtime/scripts/openclaw_pi5_setup.sh
 bash -n lelamp_runtime/scripts/install_openclaw_skill.sh

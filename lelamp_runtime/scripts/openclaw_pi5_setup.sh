@@ -11,6 +11,7 @@ INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-0}"
 RUN_ONBOARD="${RUN_ONBOARD:-0}"
 OPENCLAW_INSTALL_MODE="${OPENCLAW_INSTALL_MODE:-standard}"
 OPENCLAW_PREFIX="${OPENCLAW_PREFIX:-$HOME/.openclaw}"
+OPENCLAW_FORCE_REINSTALL="${OPENCLAW_FORCE_REINSTALL:-0}"
 PI_MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || true)"
 
 log() {
@@ -27,6 +28,10 @@ ensure_path_line() {
   fi
 }
 
+openclaw_installed() {
+  command -v openclaw >/dev/null 2>&1
+}
+
 log "Refreshing sudo credentials"
 sudo -v
 
@@ -38,29 +43,33 @@ log "Installing base packages"
 sudo apt-get update
 sudo apt-get install -y build-essential curl git
 
-case "$OPENCLAW_INSTALL_MODE" in
-  standard)
-    log "Installing OpenClaw with the official standard installer"
-    curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --no-onboard
-    ;;
-  local)
-    log "Installing OpenClaw into local prefix ${OPENCLAW_PREFIX}"
-    curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install-cli.sh | bash -s -- --no-onboard --prefix "${OPENCLAW_PREFIX}"
-    export PATH="${OPENCLAW_PREFIX}/bin:${PATH}"
-    ensure_path_line "export PATH=\"${OPENCLAW_PREFIX}/bin:\$PATH\"" "$HOME/.bashrc"
-    ensure_path_line "export PATH=\"${OPENCLAW_PREFIX}/bin:\$PATH\"" "$HOME/.zshrc"
-    ;;
-  git)
-    log "Installing OpenClaw with the official git mode"
-    OPENCLAW_INSTALL_METHOD=git OPENCLAW_NO_PROMPT=1 \
+if openclaw_installed && [[ "$OPENCLAW_FORCE_REINSTALL" != "1" ]]; then
+  log "OpenClaw is already installed at $(command -v openclaw); skipping reinstall"
+else
+  case "$OPENCLAW_INSTALL_MODE" in
+    standard)
+      log "Installing OpenClaw with the official standard installer"
       curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --no-onboard
-    ;;
-  *)
-    echo "Unsupported OPENCLAW_INSTALL_MODE: ${OPENCLAW_INSTALL_MODE}" >&2
-    echo "Expected one of: standard, local, git" >&2
-    exit 1
-    ;;
-esac
+      ;;
+    local)
+      log "Installing OpenClaw into local prefix ${OPENCLAW_PREFIX}"
+      curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install-cli.sh | bash -s -- --no-onboard --prefix "${OPENCLAW_PREFIX}"
+      export PATH="${OPENCLAW_PREFIX}/bin:${PATH}"
+      ensure_path_line "export PATH=\"${OPENCLAW_PREFIX}/bin:\$PATH\"" "$HOME/.bashrc"
+      ensure_path_line "export PATH=\"${OPENCLAW_PREFIX}/bin:\$PATH\"" "$HOME/.zshrc"
+      ;;
+    git)
+      log "Installing OpenClaw with the official git mode"
+      OPENCLAW_INSTALL_METHOD=git OPENCLAW_NO_PROMPT=1 \
+        curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --no-onboard
+      ;;
+    *)
+      echo "Unsupported OPENCLAW_INSTALL_MODE: ${OPENCLAW_INSTALL_MODE}" >&2
+      echo "Expected one of: standard, local, git" >&2
+      exit 1
+      ;;
+  esac
+fi
 
 if [[ "$INSTALL_TAILSCALE" == "1" ]]; then
   log "Installing Tailscale"

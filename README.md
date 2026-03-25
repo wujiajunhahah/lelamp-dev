@@ -5,6 +5,7 @@
 目标很明确：
 
 - 你的树莓派到手后尽量只跑一条命令
+- 如果还是空白卡，先在宿主机上一条命令种好 bootfs
 - 自动判断当前设备是不是 `Pi 5`
 - 自动走最安全的 `ReSpeaker` 配置路径
 - 自动准备 `LeLamp Runtime`
@@ -22,6 +23,24 @@ Pages 的职责是：
 - 给到开发和维护入口
 
 如果仓库开启了 Pages，默认页面就是 `site/index.html`。
+
+## 自动检测与缺失项审计
+
+这个仓库现在已经补了一个 `doctor` 脚本，用来自动检测：
+
+- 缺了什么命令
+- 已经安装了什么
+- `.env` 里哪些关键项已经有了
+- 音频设备、串口设备是否出现
+- `systemd` 服务是否安装 / 启用
+- OpenClaw skill 是否在位
+
+运行：
+
+```bash
+cd ~/lelamp_runtime
+./scripts/lelamp_doctor.sh
+```
 
 ## 你的当前硬件画像
 
@@ -44,9 +63,42 @@ Pages 的职责是：
 - `Pi 5` 主供电必须按 `5V / 5A USB-C` 处理
 - TNKR / BOM 里的 `5V / 2A` 不能当 `Pi 5` 主供电
 
-## 一条命令入口
+## 两段式极简入口
 
-把仓库放到你的 Pi 上之后，进入 [`lelamp_runtime`](./lelamp_runtime/) 执行：
+### Stage-0: 空白卡 bootfs 种子
+
+如果你的 Pi 5 还没装完系统，现在已经不是只给说明，而是补了一个真正可执行的宿主机脚本：
+
+```bash
+cp host_tools/pi5_zero_touch.env.example .pi5_zero_touch.env
+$EDITOR .pi5_zero_touch.env
+set -a
+source ./.pi5_zero_touch.env
+set +a
+./host_tools/pi5_zero_touch_seed.sh --bootfs "$BOOTFS_PATH" --password "$BOOTSTRAP_PASSWORD"
+```
+
+它会把这些首启关键件直接写进已经刷好官方 Raspberry Pi OS 的 boot 分区：
+
+- `userconf.txt`
+- `ssh`
+- `firstrun.sh`
+- `lelamp-bootstrap.env`
+- 可选 `authorized_keys`
+
+Pi 首次启动以后会自己：
+
+1. 创建用户
+2. 开 SSH
+3. 写 hostname
+4. 可选写 Wi-Fi
+5. 安装 `lelamp-bootstrap.service`
+6. 克隆 `wujiajunhahah/lelamp-dev`
+7. 自动执行 `lelamp_runtime/scripts/pi5_all_in_one.sh`
+
+### Stage-1: Pi 上总控入口
+
+如果系统已经起来，或者你要手工重跑 bring-up，进入 [`lelamp_runtime`](./lelamp_runtime/) 执行：
 
 ```bash
 cd ~/lelamp_runtime
@@ -74,14 +126,16 @@ OPENCLAW_INSTALL_MODE=standard \
 
 1. 检测 `Pi 型号 / OS / 架构`
 2. 检测你是不是在 `Pi 5` 路线
-3. 写入 `.env`
-4. 调用 [pi_setup_max.sh](./lelamp_runtime/scripts/pi_setup_max.sh) 配好 LeLamp runtime
-5. 按安全策略处理 `ReSpeaker`
-6. 安装可选的 `LeLamp` 开机服务
-7. 调用 [openclaw_pi5_setup.sh](./lelamp_runtime/scripts/openclaw_pi5_setup.sh) 安装 OpenClaw
-8. 安装 LeLamp 的 OpenClaw skill
-9. 安装一个重启后自动收尾的 one-shot service
-10. 在重启后自动生成一份设备状态报告
+3. 自动判断已有 `.env`、`/dev/ttyACM*`、已装 service、已装 OpenClaw
+4. 写入 `.env`
+5. 调用 [pi_setup_max.sh](./lelamp_runtime/scripts/pi_setup_max.sh) 配好 LeLamp runtime
+6. 按安全策略处理 `ReSpeaker`
+7. 安装可选的 `LeLamp` 开机服务
+8. 调用 [openclaw_pi5_setup.sh](./lelamp_runtime/scripts/openclaw_pi5_setup.sh) 安装 OpenClaw
+9. 安装 LeLamp 的 OpenClaw skill
+10. 安装一个重启后自动收尾的 one-shot service
+11. 跑一遍 `doctor` 快照
+12. 在重启后自动生成一份设备状态报告
 
 ## 自动适配策略
 
@@ -106,6 +160,8 @@ OPENCLAW_INSTALL_MODE=standard \
 
 ## 当前已经准备好的关键文件
 
+- 空白卡种子脚本: [host_tools/pi5_zero_touch_seed.sh](./host_tools/pi5_zero_touch_seed.sh)
+- 空白卡环境模板: [host_tools/pi5_zero_touch.env.example](./host_tools/pi5_zero_touch.env.example)
 - 总控入口: [lelamp_runtime/scripts/pi5_all_in_one.sh](./lelamp_runtime/scripts/pi5_all_in_one.sh)
 - LeLamp Pi 配置: [lelamp_runtime/scripts/pi_setup_max.sh](./lelamp_runtime/scripts/pi_setup_max.sh)
 - 重启后自动收尾: [lelamp_runtime/scripts/pi5_post_reboot_finalize.sh](./lelamp_runtime/scripts/pi5_post_reboot_finalize.sh)
@@ -119,6 +175,9 @@ OPENCLAW_INSTALL_MODE=standard \
 - Pages 主页: [site/index.html](./site/index.html)
 - Pages 开发页: [site/developer.html](./site/developer.html)
 - Pages 工作流: [.github/workflows/pages.yml](./.github/workflows/pages.yml)
+- Pre-OS 说明: [PRE_OS_BOOTSTRAP_CN.md](./PRE_OS_BOOTSTRAP_CN.md)
+- macOS 预检查脚本: [host_tools/pi5_preos_check_macos.sh](./host_tools/pi5_preos_check_macos.sh)
+- 环境审计脚本: [lelamp_runtime/scripts/lelamp_doctor.sh](./lelamp_runtime/scripts/lelamp_doctor.sh)
 
 ## 重启后看哪里
 
@@ -146,15 +205,31 @@ OPENCLAW_INSTALL_MODE=standard \
 
 所以这套方案的定义不是“把物理世界变没”，而是“把软件和系统配置压缩成一条安全路径”。
 
+## 如果 Pi 还没装系统
+
+这件事也已经收口成正式策略了，但要说清楚边界：
+
+- **系统启动后**，本仓库可以尽量做到一条命令 bring-up
+- **系统启动前**，不能靠一块完全没 OS 的 Pi 自己运行脚本
+- **系统启动前的宿主机阶段**，现在已经可以通过 `host_tools/pi5_zero_touch_seed.sh` 直接把首启自举链种好
+
+当前支持的前置路线：
+
+1. 用另一台电脑通过官方 Raspberry Pi Imager 写卡并预配置 SSH / Wi-Fi / 用户
+2. 用 Pi 5 官方 Network Install
+
+详细说明见 [PRE_OS_BOOTSTRAP_CN.md](./PRE_OS_BOOTSTRAP_CN.md)。
+
 ## 到货后推荐顺序
 
-1. 跑一遍 `./scripts/pi5_all_in_one.sh`
-2. 重启
+1. 如果还是空白卡，先跑 `./host_tools/pi5_zero_touch_seed.sh`
+2. Pi 首启后让 `lelamp-bootstrap.service` 自动收尾
 3. 看 `POST_BOOT_REPORT.md`
-4. 确认音频设备和串口设备正常
-5. 再做舵机 ID 配置和校准
-6. 再启用语音 agent
-7. 最后再让 OpenClaw 从手机入口接管高层控制
+4. 看 `./scripts/lelamp_doctor.sh`
+5. 确认音频设备和串口设备正常
+6. 再做舵机 ID 配置和校准
+7. 再启用语音 agent
+8. 最后再让 OpenClaw 从手机入口接管高层控制
 
 ## 上游参考
 

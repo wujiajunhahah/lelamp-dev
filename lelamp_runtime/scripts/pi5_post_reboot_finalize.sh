@@ -55,6 +55,8 @@ fi
 run_section "Audio Playback Devices" aplay -l
 run_section "Audio Capture Devices" arecord -l
 run_section "USB Servo Devices" bash -lc 'ls /dev/ttyACM* 2>/dev/null || echo "No /dev/ttyACM devices found"'
+run_section "LeLamp Doctor" bash -lc "cd ${REPO_ROOT} && ./scripts/lelamp_doctor.sh"
+run_section "LeLamp Bootstrap Service Status" systemctl status lelamp-bootstrap.service --no-pager
 
 if [[ "$CHECK_OPENCLAW" == "1" ]] && command -v openclaw >/dev/null 2>&1; then
   run_section "OpenClaw Version" openclaw --version
