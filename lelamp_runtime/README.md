@@ -2,6 +2,12 @@
 
 这个目录已经按 `Pi 5 + LeLamp + OpenClaw` 做过本地增强，不是上游原样。
 
+仓库级说明、Pages 入口和开发文档在上一级目录：
+
+- `../README.md`
+- `../DEVELOPMENT_GUIDE_PI5.md`
+- `../site/index.html`
+
 ## 一句话入口
 
 在树莓派上执行：

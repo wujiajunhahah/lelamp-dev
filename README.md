@@ -11,6 +11,18 @@
 - 自动准备 `OpenClaw`
 - 自动准备 `systemd` 服务和重启后的收尾检查
 
+## GitHub Pages
+
+仓库包含一个纯静态的 GitHub Pages 站点，源文件在 `site/`，部署工作流在 `.github/workflows/pages.yml`。
+
+Pages 的职责是：
+
+- 对外快速解释这套仓库到底做了什么
+- 给到一键安装入口
+- 给到开发和维护入口
+
+如果仓库开启了 Pages，默认页面就是 `site/index.html`。
+
 ## 你的当前硬件画像
 
 详细清单见 [HARDWARE_PROFILE_PI5.md](./HARDWARE_PROFILE_PI5.md)。
@@ -103,6 +115,10 @@ OPENCLAW_INSTALL_MODE=standard \
 - 环境变量模板: [lelamp_runtime/.env.example](./lelamp_runtime/.env.example)
 - Pi 5 总说明: [LELAMP_PI5_BRINGUP_CN.md](./LELAMP_PI5_BRINGUP_CN.md)
 - OpenClaw 总说明: [OPENCLAW_LELAMP_PI5_CN.md](./OPENCLAW_LELAMP_PI5_CN.md)
+- 开发维护文档: [DEVELOPMENT_GUIDE_PI5.md](./DEVELOPMENT_GUIDE_PI5.md)
+- Pages 主页: [site/index.html](./site/index.html)
+- Pages 开发页: [site/developer.html](./site/developer.html)
+- Pages 工作流: [.github/workflows/pages.yml](./.github/workflows/pages.yml)
 
 ## 重启后看哪里
 
