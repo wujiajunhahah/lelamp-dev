@@ -1,0 +1,16 @@
+[Unit]
+Description=LeLamp Runtime
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/lelamp_runtime
+EnvironmentFile=/home/pi/lelamp_runtime/.env
+ExecStart=/usr/bin/env bash -lc 'cd /home/pi/lelamp_runtime && /home/pi/.local/bin/uv run smooth_animation.py console'
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
