@@ -100,9 +100,10 @@ Pi 首次启动以后会自己：
 2. 开 SSH
 3. 写 hostname
 4. 可选写 Wi-Fi
-5. 安装 `lelamp-bootstrap.service`
-6. 克隆 `wujiajunhahah/lelamp-dev`
-7. 自动执行 `lelamp_runtime/scripts/pi5_all_in_one.sh`
+5. 用多目标回退策略等网络就绪，不只盯 `github.com`
+6. 安装 `lelamp-bootstrap.service`
+7. 克隆 `wujiajunhahah/lelamp-dev`
+8. 自动执行 `lelamp_runtime/scripts/pi5_all_in_one.sh`
 
 ### Stage-1: Pi 上总控入口
 

@@ -14,6 +14,9 @@ BOOTSTRAP_SSH_PUBLIC_KEY="${BOOTSTRAP_SSH_PUBLIC_KEY:-}"
 BOOTSTRAP_REPO_URL="${BOOTSTRAP_REPO_URL:-https://github.com/wujiajunhahah/lelamp-dev.git}"
 BOOTSTRAP_REPO_BRANCH="${BOOTSTRAP_REPO_BRANCH:-main}"
 BOOTSTRAP_REPO_DIR="${BOOTSTRAP_REPO_DIR:-lelamp-dev}"
+BOOTSTRAP_NETWORK_TEST_URLS="${BOOTSTRAP_NETWORK_TEST_URLS:-https://github.com https://api.github.com https://www.baidu.com https://connectivitycheck.gstatic.com/generate_204}"
+BOOTSTRAP_NETWORK_WAIT_ATTEMPTS="${BOOTSTRAP_NETWORK_WAIT_ATTEMPTS:-30}"
+BOOTSTRAP_REPO_WAIT_ATTEMPTS="${BOOTSTRAP_REPO_WAIT_ATTEMPTS:-18}"
 
 AUTO_ACCEPT_DEFAULTS="${AUTO_ACCEPT_DEFAULTS:-1}"
 AUTO_REBOOT="${AUTO_REBOOT:-1}"
@@ -61,6 +64,8 @@ Optional:
   --force                     Overwrite existing firstrun/bootstrap files
 
 All other installer knobs can be passed as environment variables:
+  BOOTSTRAP_NETWORK_TEST_URLS BOOTSTRAP_NETWORK_WAIT_ATTEMPTS
+  BOOTSTRAP_REPO_WAIT_ATTEMPTS
   AUTO_ACCEPT_DEFAULTS AUTO_REBOOT LAMP_ID LAMP_PORT MODE_SCRIPT
   MODEL_PROVIDER MODEL_API_KEY MODEL_BASE_URL MODEL_NAME MODEL_VOICE
   RESPEAKER_VARIANT INSTALL_LELAMP_SERVICE INSTALL_OPENCLAW
@@ -281,6 +286,9 @@ log "Writing bootstrap environment"
   emit_env_kv BOOTSTRAP_REPO_URL "$BOOTSTRAP_REPO_URL"
   emit_env_kv BOOTSTRAP_REPO_BRANCH "$BOOTSTRAP_REPO_BRANCH"
   emit_env_kv BOOTSTRAP_REPO_DIR "$BOOTSTRAP_REPO_DIR"
+  emit_env_kv BOOTSTRAP_NETWORK_TEST_URLS "$BOOTSTRAP_NETWORK_TEST_URLS"
+  emit_env_kv BOOTSTRAP_NETWORK_WAIT_ATTEMPTS "$BOOTSTRAP_NETWORK_WAIT_ATTEMPTS"
+  emit_env_kv BOOTSTRAP_REPO_WAIT_ATTEMPTS "$BOOTSTRAP_REPO_WAIT_ATTEMPTS"
   emit_env_kv AUTO_ACCEPT_DEFAULTS "$AUTO_ACCEPT_DEFAULTS"
   emit_env_kv AUTO_REBOOT "$AUTO_REBOOT"
   emit_env_kv LAMP_ID "$LAMP_ID"
@@ -402,17 +410,69 @@ exec >>"$LOG_FILE" 2>&1
 
 echo "==> $(date -u '+%Y-%m-%d %H:%M:%S UTC') zero-touch bootstrap starting"
 
+http_probe() {
+  local url="$1"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 5 --max-time 10 -o /dev/null "$url"
+    return $?
+  fi
+
+  if command -v wget >/dev/null 2>&1; then
+    wget -q --spider --timeout=10 "$url"
+    return $?
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$url" <<'PYEOF'
+import sys
+import urllib.request
+
+try:
+    with urllib.request.urlopen(sys.argv[1], timeout=10):
+        pass
+except Exception:
+    raise SystemExit(1)
+PYEOF
+    return $?
+  fi
+
+  return 1
+}
+
 wait_for_network() {
   local attempt
+  local url
+  local network_urls="${BOOTSTRAP_NETWORK_TEST_URLS:-https://github.com https://api.github.com https://www.baidu.com https://connectivitycheck.gstatic.com/generate_204}"
+  local max_attempts="${BOOTSTRAP_NETWORK_WAIT_ATTEMPTS:-30}"
 
-  for attempt in $(seq 1 30); do
-    if curl -I -sSfL https://github.com >/dev/null 2>&1; then
+  for attempt in $(seq 1 "$max_attempts"); do
+    for url in $network_urls; do
+      if http_probe "$url"; then
+        echo "Network ready via ${url}"
+        return 0
+      fi
+    done
+    sleep 10
+  done
+
+  echo "Network did not become ready in time. Tried URLs: ${network_urls}" >&2
+  return 1
+}
+
+wait_for_repo_access() {
+  local attempt
+  local max_attempts="${BOOTSTRAP_REPO_WAIT_ATTEMPTS:-18}"
+
+  for attempt in $(seq 1 "$max_attempts"); do
+    if git ls-remote --exit-code --heads "${BOOTSTRAP_REPO_URL}" "${BOOTSTRAP_REPO_BRANCH}" >/dev/null 2>&1; then
+      echo "Repository reachable: ${BOOTSTRAP_REPO_URL}#${BOOTSTRAP_REPO_BRANCH}"
       return 0
     fi
     sleep 10
   done
 
-  echo "Network did not become ready in time" >&2
+  echo "Repository did not become reachable in time: ${BOOTSTRAP_REPO_URL}#${BOOTSTRAP_REPO_BRANCH}" >&2
   return 1
 }
 
@@ -420,6 +480,7 @@ wait_for_network
 
 apt-get update
 apt-get install -y ca-certificates curl git sudo
+wait_for_repo_access
 
 if ! id "${BOOTSTRAP_USER}" >/dev/null 2>&1; then
   echo "Bootstrap user ${BOOTSTRAP_USER} does not exist yet" >&2

@@ -31,6 +31,7 @@
 - 开 SSH
 - 写 hostname
 - 可选写 Wi-Fi
+- 首启先做多目标联网探测，不被单一 `github.com` 探针卡死
 - 安装 `lelamp-bootstrap.service`
 - 首启自动克隆 `lelamp-dev`
 - 首启自动执行 `lelamp_runtime/scripts/pi5_all_in_one.sh`
