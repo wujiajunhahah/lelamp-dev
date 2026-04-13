@@ -49,26 +49,19 @@ class DashboardRuntimeBridge:
 
     def play(self, recording_name: str) -> DashboardActionResult:
         service = self._build_animation_service()
-        recordings = set(service.get_available_recordings())
-
-        if recording_name not in recordings:
-            return DashboardActionResult(False, "Recording not found", detail=recording_name)
-
         service.start()
         try:
             service.dispatch("play", recording_name)
             if not service.wait_until_playback_complete(timeout=120.0):
                 return DashboardActionResult(
                     False,
-                    "Timed out waiting for playback to finish",
+                    "Timed out waiting for recording to finish",
                     detail=recording_name,
                 )
-        except Exception as exc:
-            return DashboardActionResult(False, "Playback failed", detail=str(exc))
         finally:
             service.stop()
 
-        return DashboardActionResult(True, "Playback finished", detail=recording_name)
+        return DashboardActionResult(True, "Finished playing recording", detail=recording_name)
 
     def shutdown_pose(self) -> DashboardActionResult:
         return self._run_remote(
@@ -91,23 +84,19 @@ class DashboardRuntimeBridge:
         service = self._build_rgb_service()
         try:
             service.handle_event("solid", rgb)
-        except Exception as exc:
-            return DashboardActionResult(False, "Failed to set solid light", detail=str(exc))
         finally:
             service.stop()
 
-        return DashboardActionResult(True, "Solid light applied", detail=str(rgb))
+        return DashboardActionResult(True, "Set RGB solid color", detail=str(rgb))
 
     def clear_light(self) -> DashboardActionResult:
         service = self._build_rgb_service()
         try:
             service.clear()
-        except Exception as exc:
-            return DashboardActionResult(False, "Failed to clear light", detail=str(exc))
         finally:
             service.stop()
 
-        return DashboardActionResult(True, "Light cleared")
+        return DashboardActionResult(True, "Cleared RGB LEDs")
 
     def _run_remote(self, handler, **overrides: Any) -> DashboardActionResult:
         args = SimpleNamespace(
@@ -125,15 +114,11 @@ class DashboardRuntimeBridge:
             **overrides,
         )
 
-        try:
-            exit_code = handler(args)
-        except Exception as exc:
-            return DashboardActionResult(False, "Runtime action failed", detail=str(exc))
-
+        exit_code = handler(args)
         if exit_code != 0:
             return DashboardActionResult(
                 False,
-                "Runtime action returned a non-zero exit code",
+                "Runtime action failed",
                 detail=str(exit_code),
             )
 

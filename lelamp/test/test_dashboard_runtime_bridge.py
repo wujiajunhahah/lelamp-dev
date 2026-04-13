@@ -49,10 +49,6 @@ class FakeRGBService:
 
 
 class DashboardRuntimeBridgeTests(unittest.TestCase):
-    def setUp(self) -> None:
-        FakeAnimationService.instances.clear()
-        FakeRGBService.instances.clear()
-
     def test_play_uses_home_recording_as_idle_target(self) -> None:
         settings = SimpleNamespace(
             port="/dev/ttyACM0",
