@@ -57,20 +57,53 @@ class DashboardSamplerLoop:
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
-            self._store.patch(
+            self._patch_section(
                 "system",
-                collect_runtime_snapshot(
+                lambda: collect_runtime_snapshot(
                     self._settings,
                     self._executor,
                     self._started_at,
                 ),
+                fallback={
+                    "status": "unknown",
+                    "active_action": None,
+                    "reachable_urls": [],
+                },
             )
-            self._store.patch(
+            self._patch_section(
                 "motion",
-                collect_motor_snapshot(self._settings, self._bridge),
+                lambda: collect_motor_snapshot(self._settings, self._bridge),
+                fallback={
+                    "status": "unknown",
+                    "current_recording": None,
+                    "last_completed_recording": None,
+                    "home_recording": self._settings.home_recording,
+                    "startup_recording": self._settings.startup_recording,
+                    "last_result": None,
+                    "motors_connected": "unknown",
+                    "calibration_state": "unknown",
+                    "available_recordings": [],
+                },
             )
-            self._store.patch(
+            self._patch_section(
                 "audio",
-                collect_audio_snapshot(self._settings),
+                lambda: collect_audio_snapshot(self._settings),
+                fallback={
+                    "status": "unknown",
+                    "output_device": "Line",
+                    "volume_percent": None,
+                    "last_result": None,
+                },
             )
             self._stop_event.wait(self.interval_s)
+
+    def _patch_section(self, section: str, collect_values, *, fallback: dict[str, object]) -> None:
+        try:
+            values = collect_values()
+        except Exception:
+            values = fallback
+
+        try:
+            self._store.patch(section, values)
+        except Exception:
+            return

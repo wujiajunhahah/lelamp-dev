@@ -59,6 +59,11 @@ class DashboardSamplerTests(unittest.TestCase):
             ],
         )
 
+    def test_build_reachable_urls_wraps_explicit_ipv6_host(self) -> None:
+        urls = build_reachable_urls("::1", 8765, ip_list=[])
+
+        self.assertEqual(urls, ["http://[::1]:8765", "http://127.0.0.1:8765"])
+
     def test_collect_audio_snapshot_returns_unknown_when_probe_fails(self) -> None:
         settings = _make_settings()
 
@@ -115,8 +120,8 @@ class DashboardSamplerTests(unittest.TestCase):
             path_exists=lambda path: True,
         )
 
-        self.assertEqual(snapshot["status"], "idle")
-        self.assertTrue(snapshot["motors_connected"])
+        self.assertEqual(snapshot["status"], "unknown")
+        self.assertEqual(snapshot["motors_connected"], "unknown")
         self.assertEqual(snapshot["available_recordings"], [])
 
     def test_collect_runtime_snapshot_reports_busy_executor_and_reachable_urls(self) -> None:
@@ -208,6 +213,68 @@ class DashboardSamplerTests(unittest.TestCase):
         self.assertEqual(snapshot["system"]["status"], "ready")
         self.assertEqual(snapshot["motion"]["status"], "error")
         self.assertEqual(snapshot["audio"]["status"], "unknown")
+
+    def test_dashboard_sampler_loop_recovers_after_sampler_exception(self) -> None:
+        settings = _make_settings(dashboard_poll_ms=50)
+        store = DashboardStateStore()
+
+        with patch(
+            "lelamp.dashboard.samplers.runtime.collect_runtime_snapshot",
+            return_value={
+                "status": "ready",
+                "active_action": None,
+                "uptime_s": 4,
+                "server_started_at": 1000,
+                "reachable_urls": ["http://127.0.0.1:8765"],
+            },
+        ), patch(
+            "lelamp.dashboard.samplers.runtime.collect_motor_snapshot",
+            return_value={
+                "status": "idle",
+                "current_recording": None,
+                "last_completed_recording": None,
+                "home_recording": "home_safe",
+                "startup_recording": "wake_up",
+                "last_result": None,
+                "motors_connected": True,
+                "calibration_state": "unknown",
+                "available_recordings": ["home_safe"],
+            },
+        ), patch(
+            "lelamp.dashboard.samplers.runtime.collect_audio_snapshot",
+            side_effect=[
+                RuntimeError("probe failed"),
+                {
+                    "status": "ready",
+                    "output_device": "Line",
+                    "volume_percent": 64,
+                    "last_result": "sampled from amixer",
+                },
+            ],
+        ):
+            loop = DashboardSamplerLoop(
+                store,
+                settings,
+                SimpleNamespace(),
+                SimpleNamespace(),
+                started_at=1.0,
+            )
+
+            loop.start()
+            try:
+                for _ in range(100):
+                    snapshot = store.snapshot()
+                    if snapshot["audio"]["status"] == "ready":
+                        break
+                    loop._thread.join(timeout=0.01)
+                else:
+                    self.fail("sampler loop did not recover after sampler exception")
+            finally:
+                loop.stop()
+
+        self.assertEqual(snapshot["system"]["status"], "ready")
+        self.assertEqual(snapshot["motion"]["status"], "idle")
+        self.assertEqual(snapshot["audio"]["status"], "ready")
 
 
 if __name__ == "__main__":

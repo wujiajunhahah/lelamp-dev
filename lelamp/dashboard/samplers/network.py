@@ -9,12 +9,14 @@ def build_reachable_urls(host: str, port: int, *, ip_list: list[str] | None = No
     urls: list[str] = []
 
     if host not in {"0.0.0.0", "::"}:
-        urls.append(f"http://{host}:{port}")
+        urls.append(f"http://{_format_host(host)}:{port}")
 
-    urls.append(f"http://127.0.0.1:{port}")
+    urls.append(f"http://{_format_host('127.0.0.1')}:{port}")
 
-    for address in ip_list or _local_ipv4_addresses():
-        urls.append(f"http://{address}:{port}")
+    addresses = _local_ipv4_addresses() if ip_list is None else ip_list
+
+    for address in addresses:
+        urls.append(f"http://{_format_host(address)}:{port}")
 
     deduped: list[str] = []
     for url in urls:
@@ -34,3 +36,9 @@ def _local_ipv4_addresses() -> list[str]:
         for address in addresses
         if "." in address and not address.startswith("127.")
     ]
+
+
+def _format_host(address: str) -> str:
+    if ":" in address and not address.startswith("["):
+        return f"[{address}]"
+    return address

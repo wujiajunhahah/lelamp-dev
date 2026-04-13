@@ -9,16 +9,24 @@ def collect_motor_snapshot(settings, bridge, *, path_exists=None) -> dict[str, o
     if path_exists is None:
         path_exists = Path.exists
 
+    recordings_error = False
     try:
         recordings = bridge.list_recordings()
     except Exception:
         recordings = []
+        recordings_error = True
 
     port_path = Path(settings.port)
-    motors_connected = path_exists(port_path)
+    port_present = path_exists(port_path)
+    motors_connected: bool | str = port_present
+    status = "idle" if port_present else "warning"
+
+    if recordings_error and port_present:
+        motors_connected = "unknown"
+        status = "unknown"
 
     return {
-        "status": "idle" if motors_connected else "warning",
+        "status": status,
         "current_recording": None,
         "last_completed_recording": None,
         "home_recording": settings.home_recording,
