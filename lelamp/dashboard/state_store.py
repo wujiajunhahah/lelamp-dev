@@ -12,7 +12,7 @@ def _now_ms() -> int:
     return int(time() * 1000)
 
 
-DEFAULT_STATE = {
+_DEFAULT_STATE_TEMPLATE = {
     "system": {
         "status": "unknown",
         "active_action": None,
@@ -48,11 +48,13 @@ DEFAULT_STATE = {
     "errors": [],
 }
 
+DEFAULT_STATE = deepcopy(_DEFAULT_STATE_TEMPLATE)
+
 
 class DashboardStateStore:
     def __init__(self) -> None:
         self._lock = Lock()
-        self._state = deepcopy(DEFAULT_STATE)
+        self._state = deepcopy(_DEFAULT_STATE_TEMPLATE)
         self._state["system"]["last_update_ms"] = _now_ms()
 
     def snapshot(self) -> dict[str, Any]:
@@ -83,16 +85,19 @@ class DashboardStateStore:
             now_ms = _now_ms()
             errors = self._state["errors"]
 
-            for error in errors:
+            for index, error in enumerate(errors):
                 if error["code"] == code and error["source"] == source:
                     error["message"] = message
                     error["severity"] = severity
                     error["active"] = True
                     error["last_seen_ms"] = now_ms
+                    if index != 0:
+                        errors.insert(0, errors.pop(index))
                     self._state["system"]["last_update_ms"] = now_ms
                     return deepcopy(self._state)
 
-            errors.append(
+            errors.insert(
+                0,
                 {
                     "code": code,
                     "message": message,
@@ -101,7 +106,7 @@ class DashboardStateStore:
                     "active": True,
                     "first_seen_ms": now_ms,
                     "last_seen_ms": now_ms,
-                }
+                },
             )
             self._state["system"]["last_update_ms"] = now_ms
             return deepcopy(self._state)
