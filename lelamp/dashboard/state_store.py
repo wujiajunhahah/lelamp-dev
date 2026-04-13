@@ -86,7 +86,7 @@ class DashboardStateStore:
                 raise TypeError("updater must return a dict")
 
             target.clear()
-            target.update(updated)
+            target.update(deepcopy(updated))
             self._state["system"]["last_update_ms"] = _now_ms()
             return deepcopy(self._state)
 

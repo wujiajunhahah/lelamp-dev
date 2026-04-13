@@ -485,6 +485,7 @@ class DashboardSamplerTests(unittest.TestCase):
 
         self.assertEqual(snapshot["system"]["status"], "ready")
         self.assertEqual(snapshot["audio"]["status"], "ready")
+        self.assertEqual(snapshot["motion"]["motors_connected"], True)
 
 class _FlakyPatchStore:
     def __init__(self) -> None:
@@ -496,6 +497,9 @@ class _FlakyPatchStore:
             self._failed_audio_patch = True
             raise RuntimeError("patch failed")
         return self._store.patch(section, values)
+
+    def patch_with(self, section, updater):
+        return self._store.patch_with(section, updater)
 
     def snapshot(self):
         return self._store.snapshot()

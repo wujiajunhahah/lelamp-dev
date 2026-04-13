@@ -75,6 +75,22 @@ class DashboardStateStoreTests(unittest.TestCase):
         self.assertEqual(snapshot["motion"]["status"], "idle")
         self.assertEqual(snapshot["motion"]["current_recording"], "home_safe")
 
+    def test_patch_with_copies_nested_values(self) -> None:
+        store = DashboardStateStore()
+        update = {
+            "available_recordings": ["home_safe"],
+            "last_result": {"status": "ok"},
+        }
+
+        store.patch_with("motion", lambda current: dict(current, **update))
+        update["available_recordings"].append("wave")
+        update["last_result"]["status"] = "mutated"
+
+        snapshot = store.snapshot()
+
+        self.assertEqual(snapshot["motion"]["available_recordings"], ["home_safe"])
+        self.assertEqual(snapshot["motion"]["last_result"], {"status": "ok"})
+
     def test_record_error_deduplicates_by_code_and_source_and_refreshes_fields(self) -> None:
         store = DashboardStateStore()
 
