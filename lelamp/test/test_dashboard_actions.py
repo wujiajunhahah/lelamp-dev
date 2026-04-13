@@ -9,6 +9,34 @@ from lelamp.dashboard.state_store import DashboardStateStore
 
 
 class DashboardActionExecutorTests(unittest.TestCase):
+    def test_submit_tracks_current_action_and_busy_state_until_completion(self) -> None:
+        store = DashboardStateStore()
+        started = threading.Event()
+        gate = threading.Event()
+        executor = DashboardActionExecutor(store)
+
+        def startup() -> DashboardActionResult:
+            started.set()
+            gate.wait(timeout=1.0)
+            return DashboardActionResult(True, "done")
+
+        receipt = executor.submit(
+            "startup",
+            startup,
+            section="motion",
+            success_patch={"status": "idle"},
+        )
+
+        self.assertTrue(receipt.ok)
+        self.assertTrue(started.wait(timeout=1.0))
+        self.assertTrue(executor.is_busy())
+        self.assertEqual(executor.current_action(), "startup")
+
+        gate.set()
+        self.assertTrue(executor.wait_for_idle(timeout=1.0))
+        self.assertFalse(executor.is_busy())
+        self.assertIsNone(executor.current_action())
+
     def test_submit_rejects_overlapping_actions_while_worker_is_running(self) -> None:
         store = DashboardStateStore()
         started = threading.Event()
@@ -101,6 +129,56 @@ class DashboardActionExecutorTests(unittest.TestCase):
         self.assertEqual(snapshot["motion"]["last_result"], "motor unavailable")
         self.assertEqual(snapshot["errors"][0]["code"], "action.shutdown_pose")
         self.assertEqual(snapshot["errors"][0]["source"], "motion")
+
+    def test_submit_records_error_when_callback_raises_exception(self) -> None:
+        store = DashboardStateStore()
+        executor = DashboardActionExecutor(store)
+
+        receipt = executor.submit(
+            "startup",
+            lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+            section="motion",
+            success_patch={"status": "idle"},
+        )
+
+        self.assertTrue(receipt.ok)
+        self.assertTrue(executor.wait_for_idle(timeout=1.0))
+
+        snapshot = store.snapshot()
+        self.assertEqual(snapshot["system"]["status"], "error")
+        self.assertEqual(snapshot["motion"]["status"], "error")
+        self.assertEqual(snapshot["motion"]["last_result"], "boom")
+        self.assertEqual(snapshot["errors"][0]["code"], "action.startup")
+        self.assertTrue(snapshot["errors"][0]["active"])
+
+    def test_submit_clears_action_error_after_successful_retry(self) -> None:
+        store = DashboardStateStore()
+        executor = DashboardActionExecutor(store)
+
+        first = executor.submit(
+            "shutdown_pose",
+            lambda: DashboardActionResult(False, "motor unavailable"),
+            section="motion",
+            success_patch={"status": "idle"},
+        )
+        self.assertTrue(first.ok)
+        self.assertTrue(executor.wait_for_idle(timeout=1.0))
+
+        second = executor.submit(
+            "shutdown_pose",
+            lambda: DashboardActionResult(True, "recovered"),
+            section="motion",
+            success_patch={"status": "idle"},
+        )
+        self.assertTrue(second.ok)
+        self.assertTrue(executor.wait_for_idle(timeout=1.0))
+
+        snapshot = store.snapshot()
+        self.assertEqual(snapshot["system"]["status"], "ready")
+        self.assertEqual(snapshot["motion"]["status"], "idle")
+        self.assertEqual(snapshot["motion"]["last_result"], "recovered")
+        self.assertEqual(snapshot["errors"][0]["code"], "action.shutdown_pose")
+        self.assertFalse(snapshot["errors"][0]["active"])
 
 
 class ActionBuilderTests(unittest.TestCase):

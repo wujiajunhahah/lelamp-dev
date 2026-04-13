@@ -99,6 +99,16 @@ class DashboardStateStoreTests(unittest.TestCase):
         self.assertEqual(snapshot["errors"][0]["first_seen_ms"], 100)
         self.assertEqual(snapshot["errors"][0]["last_seen_ms"], 300)
 
+    def test_resolve_error_marks_matching_error_inactive(self) -> None:
+        store = DashboardStateStore()
+
+        with patch("lelamp.dashboard.state_store._now_ms", side_effect=[100, 250]):
+            store.record_error("action.shutdown_pose", "motor unavailable", "motion", "error")
+            snapshot = store.resolve_error("action.shutdown_pose", "motion")
+
+        self.assertFalse(snapshot["errors"][0]["active"])
+        self.assertEqual(snapshot["errors"][0]["last_seen_ms"], 250)
+
     def test_mutating_exported_default_state_does_not_affect_new_store(self) -> None:
         original_default = deepcopy(state_store.DEFAULT_STATE)
         try:

@@ -35,7 +35,7 @@ class DashboardActionExecutor:
         success_patch: dict[str, object],
     ) -> DashboardActionReceipt:
         with self._lock:
-            if self._worker is not None and self._worker.is_alive():
+            if self._active_action is not None:
                 return DashboardActionReceipt(
                     False,
                     action_id,
@@ -64,7 +64,7 @@ class DashboardActionExecutor:
 
     def is_busy(self) -> bool:
         with self._lock:
-            return self._worker is not None and self._worker.is_alive()
+            return self._active_action is not None
 
     def wait_for_idle(self, timeout: float | None = None) -> bool:
         with self._lock:
@@ -83,23 +83,42 @@ class DashboardActionExecutor:
         section: str,
         success_patch: dict[str, object],
     ) -> None:
+        system_status = "ready"
+        section_patch: dict[str, object]
+        error_payload: tuple[str, str, str, str] | None = None
+
         try:
             result = callback()
             if result.ok:
-                self._store.patch(section, dict(success_patch, last_result=result.message))
-                self._store.set_system(status="ready", active_action=None)
-                return
-
-            self._store.patch(section, {"status": "error", "last_result": result.message})
-            self._store.record_error(f"action.{action_id}", result.message, section, "error")
-            self._store.set_system(status="error", active_action=None)
+                section_patch = dict(success_patch, last_result=result.message)
+            else:
+                system_status = "error"
+                section_patch = {"status": "error", "last_result": result.message}
+                error_payload = (
+                    f"action.{action_id}",
+                    result.message,
+                    section,
+                    "error",
+                )
         except Exception as exc:
+            system_status = "error"
             message = str(exc)
-            self._store.patch(section, {"status": "error", "last_result": message})
-            self._store.record_error(f"action.{action_id}", message, section, "error")
-            self._store.set_system(status="error", active_action=None)
-        finally:
-            with self._lock:
-                self._active_action = None
-                if self._worker is not None and not self._worker.is_alive():
-                    self._worker = None
+            section_patch = {"status": "error", "last_result": message}
+            error_payload = (
+                f"action.{action_id}",
+                message,
+                section,
+                "error",
+            )
+
+        with self._lock:
+            self._active_action = None
+            self._worker = None
+
+            if error_payload is None:
+                self._store.resolve_error(f"action.{action_id}", section)
+            else:
+                self._store.record_error(*error_payload)
+
+            self._store.patch(section, section_patch)
+            self._store.set_system(status=system_status, active_action=None)

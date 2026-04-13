@@ -110,3 +110,16 @@ class DashboardStateStore:
             )
             self._state["system"]["last_update_ms"] = now_ms
             return deepcopy(self._state)
+
+    def resolve_error(self, code: str, source: str) -> dict[str, Any]:
+        with self._lock:
+            now_ms = _now_ms()
+
+            for error in self._state["errors"]:
+                if error["code"] == code and error["source"] == source:
+                    error["active"] = False
+                    error["last_seen_ms"] = now_ms
+                    self._state["system"]["last_update_ms"] = now_ms
+                    break
+
+            return deepcopy(self._state)
