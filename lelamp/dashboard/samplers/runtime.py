@@ -64,11 +64,7 @@ class DashboardSamplerLoop:
                     self._executor,
                     self._started_at,
                 ),
-                fallback={
-                    "status": "unknown",
-                    "active_action": None,
-                    "reachable_urls": [],
-                },
+                fallback=self._system_fallback(),
             )
             self._patch_section(
                 "motion",
@@ -107,3 +103,12 @@ class DashboardSamplerLoop:
             self._store.patch(section, values)
         except Exception:
             return
+
+    def _system_fallback(self) -> dict[str, object]:
+        return {
+            "status": "unknown",
+            "active_action": None,
+            "uptime_s": int(time() - self._started_at),
+            "server_started_at": int(self._started_at * 1000),
+            "reachable_urls": [],
+        }

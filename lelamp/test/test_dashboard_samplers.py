@@ -64,6 +64,17 @@ class DashboardSamplerTests(unittest.TestCase):
 
         self.assertEqual(urls, ["http://[::1]:8765", "http://127.0.0.1:8765"])
 
+    def test_build_reachable_urls_uses_discovery_only_when_ip_list_is_none(self) -> None:
+        with patch(
+            "lelamp.dashboard.samplers.network._local_ipv4_addresses",
+            return_value=["10.0.0.2"],
+        ):
+            discovered = build_reachable_urls("0.0.0.0", 8765)
+            explicit_empty = build_reachable_urls("0.0.0.0", 8765, ip_list=[])
+
+        self.assertEqual(discovered, ["http://127.0.0.1:8765", "http://10.0.0.2:8765"])
+        self.assertEqual(explicit_empty, ["http://127.0.0.1:8765"])
+
     def test_collect_audio_snapshot_returns_unknown_when_probe_fails(self) -> None:
         settings = _make_settings()
 
@@ -275,6 +286,73 @@ class DashboardSamplerTests(unittest.TestCase):
         self.assertEqual(snapshot["system"]["status"], "ready")
         self.assertEqual(snapshot["motion"]["status"], "idle")
         self.assertEqual(snapshot["audio"]["status"], "ready")
+
+    def test_dashboard_sampler_loop_resets_system_fields_after_runtime_failure(self) -> None:
+        settings = _make_settings(dashboard_poll_ms=50)
+        store = DashboardStateStore()
+
+        with patch(
+            "lelamp.dashboard.samplers.runtime.collect_runtime_snapshot",
+            side_effect=[
+                {
+                    "status": "ready",
+                    "active_action": "startup",
+                    "uptime_s": 9,
+                    "server_started_at": 999,
+                    "reachable_urls": ["http://127.0.0.1:8765"],
+                },
+                RuntimeError("runtime probe failed"),
+            ],
+        ), patch(
+            "lelamp.dashboard.samplers.runtime.collect_motor_snapshot",
+            return_value={
+                "status": "idle",
+                "current_recording": None,
+                "last_completed_recording": None,
+                "home_recording": "home_safe",
+                "startup_recording": "wake_up",
+                "last_result": None,
+                "motors_connected": True,
+                "calibration_state": "unknown",
+                "available_recordings": ["home_safe"],
+            },
+        ), patch(
+            "lelamp.dashboard.samplers.runtime.collect_audio_snapshot",
+            return_value={
+                "status": "ready",
+                "output_device": "Line",
+                "volume_percent": 64,
+                "last_result": "sampled from amixer",
+            },
+        ), patch("lelamp.dashboard.samplers.runtime.time", return_value=42.0):
+            loop = DashboardSamplerLoop(
+                store,
+                settings,
+                SimpleNamespace(),
+                SimpleNamespace(),
+                started_at=1.0,
+            )
+
+            loop.start()
+            try:
+                saw_ready = False
+                for _ in range(100):
+                    snapshot = store.snapshot()
+                    if not saw_ready and snapshot["system"]["status"] == "ready":
+                        saw_ready = True
+                    if saw_ready and snapshot["system"]["status"] == "unknown":
+                        break
+                    loop._thread.join(timeout=0.01)
+                else:
+                    self.fail("sampler loop did not apply runtime fallback")
+            finally:
+                loop.stop()
+
+        self.assertEqual(snapshot["system"]["status"], "unknown")
+        self.assertIsNone(snapshot["system"]["active_action"])
+        self.assertEqual(snapshot["system"]["uptime_s"], 41)
+        self.assertEqual(snapshot["system"]["server_started_at"], 1000)
+        self.assertEqual(snapshot["system"]["reachable_urls"], [])
 
 
 if __name__ == "__main__":
