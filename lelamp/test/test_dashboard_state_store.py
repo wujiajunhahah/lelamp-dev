@@ -86,6 +86,19 @@ class DashboardStateStoreTests(unittest.TestCase):
         self.assertEqual(snapshot["errors"][0]["code"], "audio.device_missing")
         self.assertEqual(snapshot["errors"][1]["code"], "motor.read_failed")
 
+    def test_record_error_promotes_existing_error_to_front_when_refreshed(self) -> None:
+        store = DashboardStateStore()
+
+        with patch("lelamp.dashboard.state_store._now_ms", side_effect=[100, 200, 300]):
+            store.record_error("motor.read_failed", "read timeout", "motors", "warning")
+            store.record_error("audio.device_missing", "device offline", "audio", "error")
+            snapshot = store.record_error("motor.read_failed", "retry timeout", "motors", "error")
+
+        self.assertEqual(snapshot["errors"][0]["code"], "motor.read_failed")
+        self.assertEqual(snapshot["errors"][1]["code"], "audio.device_missing")
+        self.assertEqual(snapshot["errors"][0]["first_seen_ms"], 100)
+        self.assertEqual(snapshot["errors"][0]["last_seen_ms"], 300)
+
     def test_mutating_exported_default_state_does_not_affect_new_store(self) -> None:
         original_default = deepcopy(state_store.DEFAULT_STATE)
         try:
