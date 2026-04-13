@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from threading import Lock
 from time import time
-from typing import Any
+from typing import Any, Callable
 
 
 def _now_ms() -> int:
@@ -68,6 +68,25 @@ class DashboardStateStore:
                 raise KeyError(section)
 
             target.update(deepcopy(values))
+            self._state["system"]["last_update_ms"] = _now_ms()
+            return deepcopy(self._state)
+
+    def patch_with(
+        self,
+        section: str,
+        updater: Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> dict[str, Any]:
+        with self._lock:
+            target = self._state.get(section)
+            if not isinstance(target, dict):
+                raise KeyError(section)
+
+            updated = updater(deepcopy(target))
+            if not isinstance(updated, dict):
+                raise TypeError("updater must return a dict")
+
+            target.clear()
+            target.update(updated)
             self._state["system"]["last_update_ms"] = _now_ms()
             return deepcopy(self._state)
 

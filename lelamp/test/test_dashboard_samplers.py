@@ -50,19 +50,12 @@ class DashboardSamplerTests(unittest.TestCase):
             ip_list=["192.168.0.15", "172.20.10.3"],
         )
 
-        self.assertEqual(
-            urls,
-            [
-                "http://192.168.0.15:8765",
-                "http://127.0.0.1:8765",
-                "http://172.20.10.3:8765",
-            ],
-        )
+        self.assertEqual(urls, ["http://192.168.0.15:8765"])
 
     def test_build_reachable_urls_wraps_explicit_ipv6_host(self) -> None:
         urls = build_reachable_urls("::1", 8765, ip_list=[])
 
-        self.assertEqual(urls, ["http://[::1]:8765", "http://127.0.0.1:8765"])
+        self.assertEqual(urls, ["http://[::1]:8765"])
 
     def test_build_reachable_urls_uses_discovery_only_when_ip_list_is_none(self) -> None:
         with patch(
@@ -134,36 +127,6 @@ class DashboardSamplerTests(unittest.TestCase):
         self.assertEqual(snapshot["status"], "unknown")
         self.assertEqual(snapshot["motors_connected"], "unknown")
         self.assertEqual(snapshot["available_recordings"], [])
-
-    def test_collect_motor_snapshot_preserves_running_action_fields_when_current_motion_is_provided(self) -> None:
-        settings = _make_settings()
-        current_motion = {
-            "status": "running",
-            "current_recording": "startup",
-            "last_completed_recording": "curious",
-            "home_recording": "old_home",
-            "startup_recording": "old_startup",
-            "last_result": "in progress",
-            "motors_connected": "unknown",
-            "calibration_state": "unknown",
-            "available_recordings": [],
-        }
-
-        snapshot = collect_motor_snapshot(
-            settings,
-            SimpleNamespace(list_recordings=lambda: ["home_safe", "wave"]),
-            path_exists=lambda path: True,
-            current_motion=current_motion,
-        )
-
-        self.assertEqual(snapshot["status"], "running")
-        self.assertEqual(snapshot["current_recording"], "startup")
-        self.assertEqual(snapshot["last_completed_recording"], "curious")
-        self.assertEqual(snapshot["last_result"], "in progress")
-        self.assertEqual(snapshot["home_recording"], "home_safe")
-        self.assertEqual(snapshot["startup_recording"], "wake_up")
-        self.assertEqual(snapshot["motors_connected"], True)
-        self.assertEqual(snapshot["available_recordings"], ["home_safe", "wave"])
 
     def test_collect_runtime_snapshot_reports_busy_executor_and_reachable_urls(self) -> None:
         settings = _make_settings()
@@ -408,8 +371,11 @@ class DashboardSamplerTests(unittest.TestCase):
             },
         ), patch(
             "lelamp.dashboard.samplers.runtime.collect_motor_snapshot",
-            side_effect=lambda settings, bridge, current_motion=None: {
-                **current_motion,
+            return_value={
+                "status": "idle",
+                "current_recording": None,
+                "last_completed_recording": None,
+                "last_result": None,
                 "home_recording": "home_safe",
                 "startup_recording": "wake_up",
                 "motors_connected": True,
@@ -451,6 +417,16 @@ class DashboardSamplerTests(unittest.TestCase):
         self.assertEqual(snapshot["motion"]["last_result"], "in progress")
         self.assertEqual(snapshot["motion"]["motors_connected"], True)
         self.assertEqual(snapshot["motion"]["available_recordings"], ["home_safe"])
+
+    def test_dashboard_sampler_loop_does_not_advertise_loopback_for_explicit_host_bind(self) -> None:
+        settings = _make_settings(dashboard_host="192.168.0.15", dashboard_port=8765)
+        snapshot = collect_runtime_snapshot(
+            settings,
+            SimpleNamespace(is_busy=lambda: False, current_action=lambda: None),
+            started_at=1.0,
+        )
+
+        self.assertEqual(snapshot["reachable_urls"], ["http://192.168.0.15:8765"])
 
     def test_dashboard_sampler_loop_recovers_after_store_patch_exception(self) -> None:
         settings = _make_settings(dashboard_poll_ms=50)

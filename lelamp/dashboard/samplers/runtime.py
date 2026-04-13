@@ -68,11 +68,7 @@ class DashboardSamplerLoop:
             )
             self._patch_section(
                 "motion",
-                lambda: collect_motor_snapshot(
-                    self._settings,
-                    self._bridge,
-                    current_motion=self._store.snapshot()["motion"],
-                ),
+                lambda: collect_motor_snapshot(self._settings, self._bridge),
                 fallback={
                     "status": "unknown",
                     "current_recording": None,
@@ -104,6 +100,13 @@ class DashboardSamplerLoop:
             values = fallback
 
         try:
+            if section == "motion":
+                self._store.patch_with(
+                    section,
+                    lambda current: self._merge_motion_snapshot(current, values),
+                )
+                return
+
             self._store.patch(section, values)
         except Exception:
             return
@@ -116,3 +119,20 @@ class DashboardSamplerLoop:
             "server_started_at": int(self._started_at * 1000),
             "reachable_urls": [],
         }
+
+    @staticmethod
+    def _merge_motion_snapshot(
+        current: dict[str, object],
+        observed: dict[str, object],
+    ) -> dict[str, object]:
+        merged = dict(current)
+        merged.update(observed)
+
+        if current.get("status") in {"running", "error"}:
+            merged["status"] = current["status"]
+
+        for key in ("current_recording", "last_completed_recording", "last_result"):
+            if observed.get(key) is None and key in current:
+                merged[key] = current[key]
+
+        return merged

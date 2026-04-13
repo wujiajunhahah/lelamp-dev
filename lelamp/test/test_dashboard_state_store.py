@@ -63,6 +63,18 @@ class DashboardStateStoreTests(unittest.TestCase):
         self.assertEqual(snapshot["motion"]["available_recordings"], ["home_safe"])
         self.assertEqual(snapshot["motion"]["last_result"], {"status": "ok"})
 
+    def test_patch_with_updates_section_from_current_state(self) -> None:
+        store = DashboardStateStore()
+        store.patch("motion", {"status": "running", "current_recording": "startup"})
+
+        snapshot = store.patch_with(
+            "motion",
+            lambda current: dict(current, status="idle", current_recording="home_safe"),
+        )
+
+        self.assertEqual(snapshot["motion"]["status"], "idle")
+        self.assertEqual(snapshot["motion"]["current_recording"], "home_safe")
+
     def test_record_error_deduplicates_by_code_and_source_and_refreshes_fields(self) -> None:
         store = DashboardStateStore()
 
