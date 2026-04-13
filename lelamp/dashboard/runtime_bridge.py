@@ -49,8 +49,18 @@ class DashboardRuntimeBridge:
 
     def play(self, recording_name: str) -> DashboardActionResult:
         service = self._build_animation_service()
-        service.start()
+        started = False
         try:
+            recordings = set(service.get_available_recordings())
+            if recording_name not in recordings:
+                return DashboardActionResult(
+                    False,
+                    "Recording not found",
+                    detail=recording_name,
+                )
+
+            service.start()
+            started = True
             service.dispatch("play", recording_name)
             if not service.wait_until_playback_complete(timeout=120.0):
                 return DashboardActionResult(
@@ -58,8 +68,15 @@ class DashboardRuntimeBridge:
                     "Timed out waiting for recording to finish",
                     detail=recording_name,
                 )
+        except Exception as exc:
+            return DashboardActionResult(
+                False,
+                "Failed to play recording",
+                detail=str(exc),
+            )
         finally:
-            service.stop()
+            if started:
+                service.stop()
 
         return DashboardActionResult(True, "Finished playing recording", detail=recording_name)
 
@@ -81,20 +98,34 @@ class DashboardRuntimeBridge:
         return self.play(self.settings.home_recording)
 
     def set_light_solid(self, rgb: tuple[int, int, int]) -> DashboardActionResult:
-        service = self._build_rgb_service()
+        if not self.settings.enable_rgb:
+            return DashboardActionResult(False, "RGB is disabled via LELAMP_ENABLE_RGB")
+
         try:
+            service = self._build_rgb_service()
             service.handle_event("solid", rgb)
-        finally:
-            service.stop()
+        except Exception as exc:
+            return DashboardActionResult(
+                False,
+                "Failed to set RGB solid color",
+                detail=str(exc),
+            )
 
         return DashboardActionResult(True, "Set RGB solid color", detail=str(rgb))
 
     def clear_light(self) -> DashboardActionResult:
-        service = self._build_rgb_service()
+        if not self.settings.enable_rgb:
+            return DashboardActionResult(False, "RGB is disabled via LELAMP_ENABLE_RGB")
+
         try:
+            service = self._build_rgb_service()
             service.clear()
-        finally:
-            service.stop()
+        except Exception as exc:
+            return DashboardActionResult(
+                False,
+                "Failed to clear RGB LEDs",
+                detail=str(exc),
+            )
 
         return DashboardActionResult(True, "Cleared RGB LEDs")
 
@@ -114,7 +145,14 @@ class DashboardRuntimeBridge:
             **overrides,
         )
 
-        exit_code = handler(args)
+        try:
+            exit_code = handler(args)
+        except Exception as exc:
+            return DashboardActionResult(
+                False,
+                "Runtime action failed",
+                detail=str(exc),
+            )
         if exit_code != 0:
             return DashboardActionResult(
                 False,
