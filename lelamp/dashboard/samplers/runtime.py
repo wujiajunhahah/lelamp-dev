@@ -11,9 +11,10 @@ from .network import build_reachable_urls
 
 
 def collect_runtime_snapshot(settings, executor, started_at: float) -> dict[str, object]:
+    active_action = executor.current_action()
     return {
-        "status": "running" if executor.is_busy() else "ready",
-        "active_action": executor.current_action(),
+        "status": "running" if active_action is not None else "ready",
+        "active_action": active_action,
         "uptime_s": int(time() - started_at),
         "server_started_at": int(started_at * 1000),
         "reachable_urls": build_reachable_urls(

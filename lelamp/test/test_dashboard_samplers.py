@@ -150,6 +150,22 @@ class DashboardSamplerTests(unittest.TestCase):
             ["http://127.0.0.1:8765", "http://192.168.0.15:8765"],
         )
 
+    def test_collect_runtime_snapshot_uses_active_action_as_single_source_of_truth(self) -> None:
+        settings = _make_settings()
+        executor = SimpleNamespace(
+            is_busy=lambda: False,
+            current_action=lambda: "startup",
+        )
+
+        with patch(
+            "lelamp.dashboard.samplers.runtime.build_reachable_urls",
+            return_value=["http://127.0.0.1:8765"],
+        ), patch("lelamp.dashboard.samplers.runtime.time", return_value=115.8):
+            snapshot = collect_runtime_snapshot(settings, executor, started_at=100.0)
+
+        self.assertEqual(snapshot["status"], "running")
+        self.assertEqual(snapshot["active_action"], "startup")
+
     def test_dashboard_sampler_loop_patches_store_sections(self) -> None:
         settings = _make_settings(dashboard_poll_ms=50)
         store = DashboardStateStore()
