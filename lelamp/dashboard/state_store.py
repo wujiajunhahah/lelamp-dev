@@ -16,9 +16,9 @@ DEFAULT_STATE = {
     "system": {
         "status": "unknown",
         "active_action": None,
-        "last_update_ms": _now_ms(),
+        "last_update_ms": 0,
         "uptime_s": 0,
-        "server_started_at": None,
+        "server_started_at": 0,
         "reachable_urls": [],
     },
     "motion": {
@@ -28,7 +28,7 @@ DEFAULT_STATE = {
         "home_recording": None,
         "startup_recording": None,
         "last_result": None,
-        "motors_connected": False,
+        "motors_connected": "unknown",
         "calibration_state": "unknown",
         "available_recordings": [],
     },

@@ -1,1 +1,1 @@
-"""Dashboard state package."""
+"""Local operator dashboard for LeLamp."""
