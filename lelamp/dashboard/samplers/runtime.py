@@ -68,7 +68,11 @@ class DashboardSamplerLoop:
             )
             self._patch_section(
                 "motion",
-                lambda: collect_motor_snapshot(self._settings, self._bridge),
+                lambda: collect_motor_snapshot(
+                    self._settings,
+                    self._bridge,
+                    current_motion=self._store.snapshot()["motion"],
+                ),
                 fallback={
                     "status": "unknown",
                     "current_recording": None,

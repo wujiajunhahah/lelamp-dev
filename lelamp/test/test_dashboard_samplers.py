@@ -135,6 +135,36 @@ class DashboardSamplerTests(unittest.TestCase):
         self.assertEqual(snapshot["motors_connected"], "unknown")
         self.assertEqual(snapshot["available_recordings"], [])
 
+    def test_collect_motor_snapshot_preserves_running_action_fields_when_current_motion_is_provided(self) -> None:
+        settings = _make_settings()
+        current_motion = {
+            "status": "running",
+            "current_recording": "startup",
+            "last_completed_recording": "curious",
+            "home_recording": "old_home",
+            "startup_recording": "old_startup",
+            "last_result": "in progress",
+            "motors_connected": "unknown",
+            "calibration_state": "unknown",
+            "available_recordings": [],
+        }
+
+        snapshot = collect_motor_snapshot(
+            settings,
+            SimpleNamespace(list_recordings=lambda: ["home_safe", "wave"]),
+            path_exists=lambda path: True,
+            current_motion=current_motion,
+        )
+
+        self.assertEqual(snapshot["status"], "running")
+        self.assertEqual(snapshot["current_recording"], "startup")
+        self.assertEqual(snapshot["last_completed_recording"], "curious")
+        self.assertEqual(snapshot["last_result"], "in progress")
+        self.assertEqual(snapshot["home_recording"], "home_safe")
+        self.assertEqual(snapshot["startup_recording"], "wake_up")
+        self.assertEqual(snapshot["motors_connected"], True)
+        self.assertEqual(snapshot["available_recordings"], ["home_safe", "wave"])
+
     def test_collect_runtime_snapshot_reports_busy_executor_and_reachable_urls(self) -> None:
         settings = _make_settings()
         executor = SimpleNamespace(
@@ -353,6 +383,146 @@ class DashboardSamplerTests(unittest.TestCase):
         self.assertEqual(snapshot["system"]["uptime_s"], 41)
         self.assertEqual(snapshot["system"]["server_started_at"], 1000)
         self.assertEqual(snapshot["system"]["reachable_urls"], [])
+
+    def test_dashboard_sampler_loop_does_not_erase_action_owned_motion_fields(self) -> None:
+        settings = _make_settings(dashboard_poll_ms=50)
+        store = DashboardStateStore()
+        store.patch(
+            "motion",
+            {
+                "status": "running",
+                "current_recording": "startup",
+                "last_completed_recording": "curious",
+                "last_result": "in progress",
+            },
+        )
+
+        with patch(
+            "lelamp.dashboard.samplers.runtime.collect_runtime_snapshot",
+            return_value={
+                "status": "ready",
+                "active_action": None,
+                "uptime_s": 4,
+                "server_started_at": 1000,
+                "reachable_urls": ["http://127.0.0.1:8765"],
+            },
+        ), patch(
+            "lelamp.dashboard.samplers.runtime.collect_motor_snapshot",
+            side_effect=lambda settings, bridge, current_motion=None: {
+                **current_motion,
+                "home_recording": "home_safe",
+                "startup_recording": "wake_up",
+                "motors_connected": True,
+                "calibration_state": "unknown",
+                "available_recordings": ["home_safe"],
+            },
+        ), patch(
+            "lelamp.dashboard.samplers.runtime.collect_audio_snapshot",
+            return_value={
+                "status": "ready",
+                "output_device": "Line",
+                "volume_percent": 64,
+                "last_result": "sampled from amixer",
+            },
+        ):
+            loop = DashboardSamplerLoop(
+                store,
+                settings,
+                SimpleNamespace(),
+                SimpleNamespace(),
+                started_at=1.0,
+            )
+
+            loop.start()
+            try:
+                for _ in range(100):
+                    snapshot = store.snapshot()
+                    if snapshot["motion"]["motors_connected"] is True:
+                        break
+                    loop._thread.join(timeout=0.01)
+                else:
+                    self.fail("sampler loop did not patch motion hardware fields")
+            finally:
+                loop.stop()
+
+        self.assertEqual(snapshot["motion"]["status"], "running")
+        self.assertEqual(snapshot["motion"]["current_recording"], "startup")
+        self.assertEqual(snapshot["motion"]["last_completed_recording"], "curious")
+        self.assertEqual(snapshot["motion"]["last_result"], "in progress")
+        self.assertEqual(snapshot["motion"]["motors_connected"], True)
+        self.assertEqual(snapshot["motion"]["available_recordings"], ["home_safe"])
+
+    def test_dashboard_sampler_loop_recovers_after_store_patch_exception(self) -> None:
+        settings = _make_settings(dashboard_poll_ms=50)
+        flaky_store = _FlakyPatchStore()
+
+        with patch(
+            "lelamp.dashboard.samplers.runtime.collect_runtime_snapshot",
+            return_value={
+                "status": "ready",
+                "active_action": None,
+                "uptime_s": 4,
+                "server_started_at": 1000,
+                "reachable_urls": ["http://127.0.0.1:8765"],
+            },
+        ), patch(
+            "lelamp.dashboard.samplers.runtime.collect_motor_snapshot",
+            return_value={
+                "status": "idle",
+                "current_recording": None,
+                "last_completed_recording": None,
+                "home_recording": "home_safe",
+                "startup_recording": "wake_up",
+                "last_result": None,
+                "motors_connected": True,
+                "calibration_state": "unknown",
+                "available_recordings": ["home_safe"],
+            },
+        ), patch(
+            "lelamp.dashboard.samplers.runtime.collect_audio_snapshot",
+            return_value={
+                "status": "ready",
+                "output_device": "Line",
+                "volume_percent": 64,
+                "last_result": "sampled from amixer",
+            },
+        ):
+            loop = DashboardSamplerLoop(
+                flaky_store,
+                settings,
+                SimpleNamespace(),
+                SimpleNamespace(),
+                started_at=1.0,
+            )
+
+            loop.start()
+            try:
+                for _ in range(100):
+                    snapshot = flaky_store.snapshot()
+                    if snapshot["audio"]["status"] == "ready":
+                        break
+                    loop._thread.join(timeout=0.01)
+                else:
+                    self.fail("sampler loop did not recover after store patch exception")
+            finally:
+                loop.stop()
+
+        self.assertEqual(snapshot["system"]["status"], "ready")
+        self.assertEqual(snapshot["audio"]["status"], "ready")
+
+class _FlakyPatchStore:
+    def __init__(self) -> None:
+        self._store = DashboardStateStore()
+        self._failed_audio_patch = False
+
+    def patch(self, section, values):
+        if section == "audio" and not self._failed_audio_patch:
+            self._failed_audio_patch = True
+            raise RuntimeError("patch failed")
+        return self._store.patch(section, values)
+
+    def snapshot(self):
+        return self._store.snapshot()
 
 
 if __name__ == "__main__":
