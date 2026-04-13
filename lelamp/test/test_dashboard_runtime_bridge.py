@@ -70,6 +70,14 @@ class ExplodingFactory:
         raise RuntimeError("factory boom")
 
 
+class ExplodingAnimationFactory:
+    called = False
+
+    def __new__(cls, **kwargs):
+        cls.called = True
+        raise RuntimeError("animation factory boom")
+
+
 class DashboardRuntimeBridgeTests(unittest.TestCase):
     def setUp(self) -> None:
         FakeAnimationService.instances = []
@@ -81,6 +89,7 @@ class DashboardRuntimeBridgeTests(unittest.TestCase):
         FakeRGBService.raise_on_handle_event = None
         FakeRGBService.raise_on_clear = None
         ExplodingFactory.called = False
+        ExplodingAnimationFactory.called = False
 
     @staticmethod
     def _make_settings(enable_rgb: bool = True) -> SimpleNamespace:
@@ -157,6 +166,23 @@ class DashboardRuntimeBridgeTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("failed", result.message.lower())
         self.assertIn("unavailable", result.detail)
+
+    def test_play_converts_animation_factory_failure_to_failed_result(self) -> None:
+        settings = self._make_settings()
+
+        bridge = DashboardRuntimeBridge(
+            settings,
+            animation_factory=ExplodingAnimationFactory,
+            rgb_factory=FakeRGBService,
+            remote_module=SimpleNamespace(),
+        )
+
+        result = bridge.play("curious")
+
+        self.assertFalse(result.ok)
+        self.assertIn("failed", result.message.lower())
+        self.assertIn("animation factory boom", result.detail)
+        self.assertTrue(ExplodingAnimationFactory.called)
 
     def test_startup_converts_remote_exception_to_failed_result(self) -> None:
         settings = self._make_settings()

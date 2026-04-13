@@ -62,9 +62,9 @@ class DashboardRuntimeBridge:
         )
 
     def play(self, recording_name: str) -> DashboardActionResult:
-        service = self._build_animation_service()
         started = False
         try:
+            service = self._build_animation_service()
             recordings = set(service.get_available_recordings())
             if recording_name not in recordings:
                 return DashboardActionResult(
