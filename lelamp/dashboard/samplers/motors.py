@@ -18,8 +18,8 @@ def collect_motor_snapshot(settings, bridge, *, path_exists=None) -> dict[str, o
 
     port_path = Path(settings.port)
     port_present = path_exists(port_path)
-    motors_connected: bool | str = port_present
-    status = "idle" if port_present else "warning"
+    motors_connected: bool | str = "unknown" if port_present else False
+    status = "unknown" if port_present else "warning"
 
     if recordings_error and port_present:
         motors_connected = "unknown"

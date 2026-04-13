@@ -77,7 +77,7 @@ class DashboardSamplerTests(unittest.TestCase):
         snapshot = collect_audio_snapshot(settings, run_command=raising_run_command)
 
         self.assertEqual(snapshot["status"], "unknown")
-        self.assertEqual(snapshot["output_device"], "Line")
+        self.assertIsNone(snapshot["output_device"])
         self.assertIsNone(snapshot["volume_percent"])
         self.assertIsNone(snapshot["last_result"])
 
@@ -112,6 +112,20 @@ class DashboardSamplerTests(unittest.TestCase):
         self.assertIsNone(snapshot["current_recording"])
         self.assertIsNone(snapshot["last_completed_recording"])
         self.assertIsNone(snapshot["last_result"])
+
+    def test_collect_motor_snapshot_reports_unknown_connectivity_without_hardware_probe(self) -> None:
+        settings = _make_settings()
+        bridge = SimpleNamespace(list_recordings=lambda: ["home_safe", "wave"])
+
+        snapshot = collect_motor_snapshot(
+            settings,
+            bridge,
+            path_exists=lambda path: True,
+        )
+
+        self.assertEqual(snapshot["status"], "unknown")
+        self.assertEqual(snapshot["motors_connected"], "unknown")
+        self.assertEqual(snapshot["available_recordings"], ["home_safe", "wave"])
 
     def test_collect_motor_snapshot_falls_back_to_empty_recordings_on_probe_error(self) -> None:
         settings = _make_settings()

@@ -21,7 +21,7 @@ def collect_audio_snapshot(settings, *, run_command=subprocess.run) -> dict[str,
     except Exception:
         return {
             "status": "unknown",
-            "output_device": "Line",
+            "output_device": None,
             "volume_percent": None,
             "last_result": None,
         }
@@ -30,7 +30,7 @@ def collect_audio_snapshot(settings, *, run_command=subprocess.run) -> dict[str,
     if match is None:
         return {
             "status": "unknown",
-            "output_device": "Line",
+            "output_device": None,
             "volume_percent": None,
             "last_result": None,
         }

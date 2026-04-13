@@ -87,7 +87,7 @@ class DashboardSamplerLoop:
                 lambda: collect_audio_snapshot(self._settings),
                 fallback={
                     "status": "unknown",
-                    "output_device": "Line",
+                    "output_device": None,
                     "volume_percent": None,
                     "last_result": None,
                 },
