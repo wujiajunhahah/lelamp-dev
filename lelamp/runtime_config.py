@@ -35,6 +35,13 @@ def _get_int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer, got {value!r}") from exc
 
 
+def _get_positive_int(name: str, default: int) -> int:
+    value = _get_int(name, default)
+    if value <= 0:
+        raise ValueError(f"{name} must be greater than 0")
+    return value
+
+
 def _get_float(name: str, default: float) -> float:
     value = os.getenv(name)
     if value is None or value == "":
@@ -150,8 +157,8 @@ def load_runtime_settings() -> RuntimeSettings:
         lamp_id=_get_str("LELAMP_ID", "lelamp"),
         fps=_get_int("LELAMP_FPS", 30),
         dashboard_host=_get_str("LELAMP_DASHBOARD_HOST", "0.0.0.0"),
-        dashboard_port=_get_int("LELAMP_DASHBOARD_PORT", 8765),
-        dashboard_poll_ms=_get_int("LELAMP_DASHBOARD_POLL_MS", 400),
+        dashboard_port=_get_positive_int("LELAMP_DASHBOARD_PORT", 8765),
+        dashboard_poll_ms=_get_positive_int("LELAMP_DASHBOARD_POLL_MS", 400),
         model_provider=model_provider,
         model_api_key=_get_model_api_key(),
         model_base_url=_get_optional_str("MODEL_BASE_URL") or _default_model_base_url(model_provider),
