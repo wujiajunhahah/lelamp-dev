@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any
-
-from lelamp import remote_control
-from lelamp.service.motors.animation_service import AnimationService
-from lelamp.service.rgb.rgb_service import RGBService
+from typing import Any, Callable
 
 
 @dataclass(frozen=True)
@@ -18,18 +14,36 @@ class DashboardActionResult:
     detail: str | None = None
 
 
+def _default_animation_factory(**kwargs):
+    from lelamp.service.motors.animation_service import AnimationService
+
+    return AnimationService(**kwargs)
+
+
+def _default_rgb_factory(**kwargs):
+    from lelamp.service.rgb.rgb_service import RGBService
+
+    return RGBService(**kwargs)
+
+
+def _default_remote_module():
+    from lelamp import remote_control
+
+    return remote_control
+
+
 class DashboardRuntimeBridge:
     def __init__(
         self,
         settings,
-        animation_factory=AnimationService,
-        rgb_factory=RGBService,
-        remote_module=remote_control,
+        animation_factory: Callable[..., Any] | None = None,
+        rgb_factory: Callable[..., Any] | None = None,
+        remote_module=None,
     ) -> None:
         self.settings = settings
-        self.animation_factory = animation_factory
-        self.rgb_factory = rgb_factory
-        self.remote_module = remote_module
+        self.animation_factory = animation_factory or _default_animation_factory
+        self.rgb_factory = rgb_factory or _default_rgb_factory
+        self.remote_module = remote_module or _default_remote_module()
 
     def list_recordings(self) -> list[str]:
         service = self._build_animation_service()
