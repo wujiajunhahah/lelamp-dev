@@ -1,22 +1,20 @@
 from dotenv import load_dotenv
+import argparse
 import subprocess
 
-from livekit import agents
+from livekit import agents, api, rtc
 from livekit.agents import (
     AgentSession, 
     Agent, 
     RoomInputOptions,
     function_tool
 )
+import logging
 from livekit.plugins import (
     openai,
     noise_cancellation,
 )
-from lelamp.runtime_config import (
-    RuntimeSettings,
-    build_realtime_model_config,
-    load_runtime_settings,
-)
+from typing import Union
 from lelamp.service.motors.animation_service import AnimationService
 from lelamp.service.rgb.rgb_service import RGBService
 
@@ -24,8 +22,7 @@ load_dotenv()
 
 # Agent Class
 class LeLamp(Agent):
-    def __init__(self, settings: RuntimeSettings | None = None) -> None:
-        self.settings = settings or load_runtime_settings()
+    def __init__(self, port: str = "/dev/ttyACM0", lamp_id: str = "lelamp") -> None:
         super().__init__(instructions="""You are LeLamp — a slightly clumsy, extremely sarcastic, endlessly curious robot lamp. You speak in sarcastic sentences and express yourself with both motions and colorful lights.
 
 Demo rules:
@@ -46,20 +43,20 @@ Demo rules:
         
         # Initialize and start services
         self.animation_service = AnimationService(
-            port=self.settings.port,
-            lamp_id=self.settings.lamp_id,
-            fps=self.settings.fps,
-            duration=self.settings.interpolation_duration,
-            idle_recording=self.settings.idle_recording,
+            port=port,
+            lamp_id=lamp_id,
+            fps=30,
+            duration=3.0,
+            idle_recording="idle"
         )
         self.rgb_service = RGBService(
-            led_count=self.settings.led_count,
-            led_pin=self.settings.led_pin,
-            led_freq_hz=self.settings.led_freq_hz,
-            led_dma=self.settings.led_dma,
-            led_brightness=self.settings.led_brightness,
-            led_invert=self.settings.led_invert,
-            led_channel=self.settings.led_channel,
+            led_count=40,
+            led_pin=12,
+            led_freq_hz=800000,
+            led_dma=10,
+            led_brightness=255,
+            led_invert=False,
+            led_channel=0
         )
         
         # Start services
@@ -67,16 +64,16 @@ Demo rules:
         self.rgb_service.start()
 
         # Trigger wake up animation via animation service
-        self.animation_service.dispatch("play", self.settings.startup_recording)
+        self.animation_service.dispatch("play", "wake_up")
         self.rgb_service.dispatch("solid", (255, 255, 255))
-        self._set_system_volume(self.settings.startup_volume)
+        self._set_system_volume(100)
 
     def _set_system_volume(self, volume_percent: int):
         """Internal helper to set system volume"""
         try:
-            cmd_line = ["sudo", "-u", self.settings.audio_user, "amixer", "sset", "Line", f"{volume_percent}%"]
-            cmd_line_dac = ["sudo", "-u", self.settings.audio_user, "amixer", "sset", "Line DAC", f"{volume_percent}%"]
-            cmd_line_hp = ["sudo", "-u", self.settings.audio_user, "amixer", "sset", "HP", f"{volume_percent}%"]
+            cmd_line = ["sudo", "-u", "pi", "amixer", "sset", "Line", f"{volume_percent}%"]
+            cmd_line_dac = ["sudo", "-u", "pi", "amixer", "sset", "Line DAC", f"{volume_percent}%"]
+            cmd_line_hp = ["sudo", "-u", "pi", "amixer", "sset", "HP", f"{volume_percent}%"]
             
             
             subprocess.run(cmd_line, capture_output=True, text=True, timeout=5)
@@ -235,10 +232,12 @@ Demo rules:
 
 # Entry to the agent
 async def entrypoint(ctx: agents.JobContext):
-    agent = LeLamp(settings=load_runtime_settings())
+    agent = LeLamp()
     
     session = AgentSession(
-        llm=openai.realtime.RealtimeModel(**build_realtime_model_config(agent.settings))
+        llm=openai.realtime.RealtimeModel(
+            voice="ballad" 
+        )
     )
 
     await session.start(

@@ -193,6 +193,39 @@ OPENCLAW_INSTALL_MODE=standard \
 - macOS 预检查脚本: [host_tools/pi5_preos_check_macos.sh](./host_tools/pi5_preos_check_macos.sh)
 - 环境审计脚本: [lelamp_runtime/scripts/lelamp_doctor.sh](./lelamp_runtime/scripts/lelamp_doctor.sh)
 
+## Runtime 管理与本地面板
+
+现在真正需要长期维护的运行时代码都收在：
+
+- [lelamp_runtime/](./lelamp_runtime/)
+
+如果你后面继续加动作、改执行逻辑、调 dashboard，主要看这个子目录就够了。
+
+推荐的同步方式不是手工拷文件，而是直接从开发机执行：
+
+```bash
+cd lelamp_runtime
+START_DASHBOARD=1 ./scripts/sync_pi_runtime.sh
+```
+
+这个脚本会：
+
+- 把当前 `lelamp_runtime` 同步到树莓派
+- 保留树莓派自己的 `.env` 和 `.venv`
+- 自动跑 dashboard smoke tests
+- 安全重启本地 dashboard
+
+树莓派上的本地面板默认是：
+
+- 本机：`http://127.0.0.1:8765`
+- 同网设备：看 `GET /api/state` 里的 `reachable_urls`
+
+当前 dashboard 特点：
+
+- 中文界面，适合演示
+- 手机端优先显示当前状态
+- 没接台灯时依然诚实显示状态，不伪造“正常”
+
 ## 重启后看哪里
 
 重启以后，自动收尾脚本会生成：
@@ -247,6 +280,8 @@ OPENCLAW_INSTALL_MODE=standard \
 
 ## 上游参考
 
+- 当前维护主仓库: https://github.com/wujiajunhahah/lelamp-dev
+- 当前运行时代码: [lelamp_runtime/](./lelamp_runtime/)
 - LeLamp 文档与硬件: https://tnkr.ai/explore/docs/human-computer-lab/lelamp-v1
-- LeLamp Runtime 上游: https://github.com/humancomputerlab/lelamp_runtime
+- LeLamp Runtime 上游参考: https://github.com/humancomputerlab/lelamp_runtime
 - OpenClaw 文档: https://docs.openclaw.ai/

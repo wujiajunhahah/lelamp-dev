@@ -27,7 +27,7 @@ chmod +x scripts/pi5_all_in_one.sh
 - [scripts/pi5_all_in_one.sh](./scripts/pi5_all_in_one.sh)
   总控入口，负责 Pi 5 检测、`.env`、LeLamp、OpenClaw、post-boot finalizer。
 - [scripts/pi_setup_max.sh](./scripts/pi_setup_max.sh)
-  只处理 LeLamp runtime、依赖、音频 overlay、可选 systemd 服务。
+  处理 LeLamp runtime、依赖、音频 overlay、`ws2812-pio` LED overlay 持久化、可选 systemd 服务。
 - [scripts/openclaw_pi5_setup.sh](./scripts/openclaw_pi5_setup.sh)
   处理 OpenClaw、可选 Tailscale、可选 onboarding。
 - [scripts/install_openclaw_skill.sh](./scripts/install_openclaw_skill.sh)
@@ -87,6 +87,7 @@ LELAMP_ID=lelamp
 LELAMP_PORT=/dev/ttyACM0
 LELAMP_AUDIO_USER=pi
 LELAMP_LED_COUNT=40
+LELAMP_ENABLE_RGB=true
 ```
 
 说明：
@@ -94,6 +95,30 @@ LELAMP_LED_COUNT=40
 - `MODEL_*` 是当前仓库的标准配置
 - `MODEL_PROVIDER=glm` 是默认路径
 - `ZAI_API_KEY` 和 `OPENAI_API_KEY` 仍然保留兼容回退，但不再是主配置键
+- `LELAMP_ENABLE_RGB=false` 可以临时关闭 LED 路径，隔离音频、动作和语音问题
+
+## Pi 5 LED 路径
+
+Pi 5 上默认走官方 `ws2812-pio` 驱动，不走 `rpi_ws281x` DMA 路径。
+
+`scripts/pi_setup_max.sh` 会把下面这行持久化到 `/boot/firmware/config.txt`：
+
+```bash
+dtoverlay=ws2812-pio,gpio=12,num_leds=40
+```
+
+重启以后应当满足：
+
+```bash
+ls -l /dev/leds0
+sudo uv run -m lelamp.remote_control solid 255 160 32
+```
+
+如果你改了灯板数量或信号脚，安装时覆盖：
+
+```bash
+LED_PIN=12 LED_COUNT=40 ./scripts/pi_setup_max.sh
+```
 
 ## OpenClaw 该怎么理解
 
@@ -119,6 +144,80 @@ uv run -m lelamp.remote_control list-recordings
 uv run -m lelamp.remote_control play curious
 uv run -m lelamp.remote_control solid 255 160 32
 uv run -m lelamp.remote_control clear
+```
+
+## Local Dashboard
+
+本地状态面板现在和 runtime 一起内置在仓库里，适合：
+
+- 树莓派本机屏幕全屏演示
+- 同一局域网里的手机或电脑访问
+- 手机热点或树莓派热点环境下的本地控制
+
+启动：
+
+```bash
+uv run -m lelamp.dashboard.api
+```
+
+默认监听：
+
+```bash
+LELAMP_DASHBOARD_HOST=0.0.0.0
+LELAMP_DASHBOARD_PORT=8765
+LELAMP_DASHBOARD_POLL_MS=400
+```
+
+打开方式：
+
+- 树莓派本机：`http://127.0.0.1:8765`
+- 同网设备：看面板 `现场信息` 里的可访问地址
+- 当前树莓派也会自动把局域网地址写进 `reachable_urls`
+
+面板能力：
+
+- 查看 system / motion / light / audio 的实时状态
+- 触发 `startup`、`play`、`stop`、`shutdown_pose`
+- 切到暖琥珀灯光或清灯
+- 看当前可用 recordings、最近错误和可访问 URL
+
+当前界面已经做过一轮演示向收口：
+
+- 主界面默认中文
+- 手机端优先显示当前状态
+- 未接台灯时仍然诚实显示 `motion.status=error`
+
+## Sync 到树莓派
+
+如果你在 Mac 上改完了 `lelamp_runtime`，推荐用仓库自带脚本同步到树莓派，不要手工拷文件：
+
+```bash
+./scripts/sync_pi_runtime.sh
+```
+
+常用方式：
+
+```bash
+START_DASHBOARD=1 ./scripts/sync_pi_runtime.sh
+```
+
+这会做四件事：
+
+- `rsync` 当前 runtime 到树莓派上的 `~/lelamp-dev/lelamp_runtime`
+- 保留树莓派自己的 `.env` 和 `.venv`
+- 在树莓派上跑 dashboard smoke tests
+- 安全重启本地 dashboard 服务
+
+脚本默认目标是：
+
+```bash
+wujiajun@172.20.10.2
+```
+
+如果你以后换机器或目录，也可以显式传：
+
+```bash
+./scripts/sync_pi_runtime.sh your-user@your-pi-ip /home/your-user/lelamp-dev
 ```
 
 ## 重启后自动收尾
@@ -163,6 +262,8 @@ uv run -m lelamp.test.test_motors --id lelamp --port /dev/ttyACM0
 ```bash
 uv run -m lelamp.test.test_audio
 sudo uv run -m lelamp.test.test_rgb
+sudo uv run -m lelamp.remote_control solid 255 160 32
+sudo uv run -m lelamp.remote_control clear
 ```
 
 ### 语音 Agent

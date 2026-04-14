@@ -35,6 +35,13 @@ def _get_int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer, got {value!r}") from exc
 
 
+def _get_positive_int(name: str, default: int) -> int:
+    value = _get_int(name, default)
+    if value <= 0:
+        raise ValueError(f"{name} must be greater than 0")
+    return value
+
+
 def _get_float(name: str, default: float) -> float:
     value = os.getenv(name)
     if value is None or value == "":
@@ -115,6 +122,9 @@ class RuntimeSettings:
     port: str
     lamp_id: str
     fps: int
+    dashboard_host: str
+    dashboard_port: int
+    dashboard_poll_ms: int
     model_provider: str
     model_api_key: str | None
     model_base_url: str | None
@@ -127,9 +137,12 @@ class RuntimeSettings:
     led_brightness: int
     led_invert: bool
     led_channel: int
+    enable_rgb: bool
     startup_volume: int
     startup_recording: str
     idle_recording: str
+    home_recording: str
+    use_home_pose_relative: bool
     interpolation_duration: float
     audio_user: str
 
@@ -137,10 +150,15 @@ class RuntimeSettings:
 def load_runtime_settings() -> RuntimeSettings:
     model_provider = _get_model_provider()
 
+    idle_recording = _get_str("LELAMP_IDLE_RECORDING", "idle")
+
     return RuntimeSettings(
         port=_get_str("LELAMP_PORT", "/dev/ttyACM0"),
         lamp_id=_get_str("LELAMP_ID", "lelamp"),
         fps=_get_int("LELAMP_FPS", 30),
+        dashboard_host=_get_str("LELAMP_DASHBOARD_HOST", "0.0.0.0"),
+        dashboard_port=_get_positive_int("LELAMP_DASHBOARD_PORT", 8765),
+        dashboard_poll_ms=_get_positive_int("LELAMP_DASHBOARD_POLL_MS", 400),
         model_provider=model_provider,
         model_api_key=_get_model_api_key(),
         model_base_url=_get_optional_str("MODEL_BASE_URL") or _default_model_base_url(model_provider),
@@ -153,9 +171,12 @@ def load_runtime_settings() -> RuntimeSettings:
         led_brightness=_get_int("LELAMP_LED_BRIGHTNESS", 255),
         led_invert=_get_bool("LELAMP_LED_INVERT", False),
         led_channel=_get_int("LELAMP_LED_CHANNEL", 0),
+        enable_rgb=_get_bool("LELAMP_ENABLE_RGB", True),
         startup_volume=_get_int("LELAMP_STARTUP_VOLUME", 100),
         startup_recording=_get_str("LELAMP_STARTUP_RECORDING", "wake_up"),
-        idle_recording=_get_str("LELAMP_IDLE_RECORDING", "idle"),
+        idle_recording=idle_recording,
+        home_recording=_get_str("LELAMP_HOME_RECORDING", idle_recording),
+        use_home_pose_relative=_get_bool("LELAMP_USE_HOME_POSE_RELATIVE", False),
         interpolation_duration=_get_float("LELAMP_INTERPOLATION_DURATION", 3.0),
         audio_user=_get_str(
             "LELAMP_AUDIO_USER",

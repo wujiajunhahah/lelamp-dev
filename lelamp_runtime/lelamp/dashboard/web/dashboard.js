@@ -1,0 +1,592 @@
+var DashboardApp = (function () {
+  var ACTION_META = {
+    startupButton: {
+      actionKey: "startup",
+      baseClass: "action-button action-button--primary",
+      label: "启动灯",
+      runningLabel: "启动中",
+    },
+    playButton: {
+      actionKey: "play",
+      baseClass: "action-button",
+      label: "播放动作",
+      runningLabel: "动作中",
+    },
+    stopButton: {
+      actionKey: "stop",
+      baseClass: "action-button",
+      label: "回到待机",
+      runningLabel: "回位中",
+    },
+    shutdownPoseButton: {
+      actionKey: "shutdown_pose",
+      baseClass: "action-button action-button--warn",
+      label: "进入休息",
+      runningLabel: "休息中",
+    },
+    lightAmberButton: {
+      actionKey: "light_solid",
+      baseClass: "action-button action-button--amber",
+      label: "暖黄灯光",
+      runningLabel: "点亮中",
+    },
+    lightClearButton: {
+      actionKey: "light_clear",
+      baseClass: "action-button",
+      label: "关闭灯光",
+      runningLabel: "关闭中",
+    },
+  };
+
+  var runtimeMeta = {
+    pollMs: 400,
+    dashboardHost: "0.0.0.0",
+    dashboardPort: 8765,
+  };
+
+  function byId(documentRef, id) {
+    return documentRef.getElementById(id);
+  }
+
+  function text(node, value) {
+    if (node) {
+      node.textContent = value == null ? "" : String(value);
+    }
+  }
+
+  function setClassName(node, className) {
+    if (node) {
+      node.className = className;
+    }
+  }
+
+  function translateStatus(status) {
+    if (status === "ready" || status === "solid") {
+      return "就绪";
+    }
+    if (status === "muted") {
+      return "安静";
+    }
+    if (status === "running") {
+      return "进行中";
+    }
+    if (status === "transition") {
+      return "过渡中";
+    }
+    if (status === "warning") {
+      return "注意";
+    }
+    if (status === "error") {
+      return "异常";
+    }
+    if (status === "live") {
+      return "在线";
+    }
+    if (status === "offline") {
+      return "离线";
+    }
+    if (status === "off") {
+      return "已关闭";
+    }
+    return "未知";
+  }
+
+  function translateMotionStatus(status) {
+    if (status === "idle") {
+      return "醒着";
+    }
+    if (status === "running") {
+      return "动作中";
+    }
+    if (status === "homing") {
+      return "回位中";
+    }
+    if (status === "error") {
+      return "需要检查";
+    }
+    return "未连接";
+  }
+
+  function translateCalibrationState(state) {
+    if (state === "ok") {
+      return "校准正常";
+    }
+    if (state === "suspect") {
+      return "校准可疑";
+    }
+    if (state === "missing") {
+      return "缺少校准";
+    }
+    return "校准未知";
+  }
+
+  function translateMotorConnectivity(value) {
+    if (value === true) {
+      return "在线";
+    }
+    if (value === false) {
+      return "未连接";
+    }
+    return "未知";
+  }
+
+  function translateActionKey(actionKey) {
+    if (!actionKey) {
+      return "空闲";
+    }
+    if (actionKey === "startup") {
+      return "启动灯";
+    }
+    if (actionKey === "play") {
+      return "播放动作";
+    }
+    if (actionKey === "stop") {
+      return "回到待机";
+    }
+    if (actionKey === "shutdown_pose") {
+      return "进入休息";
+    }
+    if (actionKey === "light_solid") {
+      return "暖黄灯光";
+    }
+    if (actionKey === "light_clear") {
+      return "关闭灯光";
+    }
+    return String(actionKey);
+  }
+
+  function statusTone(status) {
+    if (status === "ready" || status === "solid" || status === "muted") {
+      return "ready";
+    }
+    if (status === "running" || status === "transition") {
+      return "running";
+    }
+    if (status === "warning") {
+      return "warn";
+    }
+    if (status === "error") {
+      return "error";
+    }
+    if (status === "live") {
+      return "live";
+    }
+    if (status === "offline") {
+      return "offline";
+    }
+    return "unknown";
+  }
+
+  function formatRgb(color) {
+    if (!color) {
+      return "--";
+    }
+    return [color.red, color.green, color.blue].join(", ");
+  }
+
+  function formatLightDetail(light) {
+    if (!light || !light.color) {
+      return light && light.effect ? String(light.effect) : "--";
+    }
+    return "RGB " + formatRgb(light.color);
+  }
+
+  function formatVolume(audio) {
+    if (!audio || audio.volume_percent == null) {
+      return audio && audio.output_device ? String(audio.output_device) : "--";
+    }
+    return String(audio.volume_percent) + "%";
+  }
+
+  function formatMs(value) {
+    return String(value || 0) + " 毫秒";
+  }
+
+  function formatSeconds(value) {
+    return String(value || 0) + " 秒";
+  }
+
+  function renderTokens(node, items, emptyLabel) {
+    if (!node) {
+      return;
+    }
+
+    if (!items || !items.length) {
+      node.innerHTML = '<span class="token-list__item token-list__item--empty">' + emptyLabel + "</span>";
+      return;
+    }
+
+    node.innerHTML = items
+      .map(function (item) {
+        return '<span class="token-list__item">' + String(item) + "</span>";
+      })
+      .join("");
+  }
+
+  function renderErrors(node, errors) {
+    if (!node) {
+      return;
+    }
+
+    if (!errors || !errors.length) {
+      node.innerHTML = '<div class="error-feed__item"><div class="error-feed__message">当前没有错误信息。</div></div>';
+      return;
+    }
+
+    node.innerHTML = errors
+      .map(function (error) {
+        var severity = error.severity || "warning";
+        var status = error.active ? "持续中" : "已恢复";
+        var severityText = severity === "error" ? "异常" : "注意";
+        return (
+          '<div class="error-feed__item error-feed__item--' + severity + '">' +
+          '<div class="error-feed__meta"><span>' + severityText + "</span><span>" + status + "</span></div>" +
+          '<div class="error-feed__message">' + String(error.message || error.code || "未知错误") + "</div>" +
+          "</div>"
+        );
+      })
+      .join("");
+  }
+
+  function buttonClass(baseClass, state) {
+    if (state === "running") {
+      return baseClass + " action-button--running";
+    }
+    if (state === "error") {
+      return baseClass + " action-button--error";
+    }
+    if (state === "disabled") {
+      return baseClass + " action-button--disabled";
+    }
+    return baseClass;
+  }
+
+  function actionLabel(meta, state) {
+    if (state === "running" && meta.runningLabel) {
+      return meta.runningLabel;
+    }
+    return meta.label;
+  }
+
+  function defaultActionPayload(disableAll) {
+    var payload = {
+      busy: disableAll,
+      actions: {},
+      recordings: [],
+      poll_ms: runtimeMeta.pollMs,
+      config: {
+        dashboard_host: runtimeMeta.dashboardHost,
+        dashboard_port: runtimeMeta.dashboardPort,
+        poll_ms: runtimeMeta.pollMs,
+      },
+    };
+
+    Object.keys(ACTION_META).forEach(function (id) {
+      var meta = ACTION_META[id];
+      payload.actions[meta.actionKey] = {
+        enabled: !disableAll,
+        state: disableAll ? "disabled" : "enabled",
+        label: meta.label,
+      };
+    });
+
+    return payload;
+  }
+
+  function applyActionAvailability(documentRef, payload) {
+    var actions = payload && payload.actions ? payload.actions : defaultActionPayload(true).actions;
+
+    Object.keys(ACTION_META).forEach(function (id) {
+      var node = byId(documentRef, id);
+      var meta = ACTION_META[id];
+      var config = actions[meta.actionKey] || {
+        enabled: false,
+        state: "disabled",
+        label: meta.label,
+      };
+      if (node) {
+        node.disabled = config.enabled === false;
+        node.textContent = actionLabel(meta, config.state || "enabled");
+        node.className = buttonClass(meta.baseClass, config.state || "enabled");
+      }
+    });
+  }
+
+  function populateRecordings(documentRef, recordings) {
+    var select = byId(documentRef, "recordingSelect");
+    var currentValue;
+    if (!select) {
+      return;
+    }
+
+    currentValue = select.value;
+    select.innerHTML = "";
+    if (select.children && typeof select.children.length === "number") {
+      select.children.length = 0;
+    }
+    if (!recordings || !recordings.length) {
+      select.disabled = true;
+      select.value = "";
+      return;
+    }
+
+    select.disabled = false;
+    recordings.forEach(function (recording, index) {
+      var option = documentRef.createElement("option");
+      option.value = recording;
+      option.textContent = recording;
+      if (currentValue && currentValue === recording) {
+        select.value = recording;
+      } else if (!select.value && index === 0) {
+        select.value = recording;
+      }
+      if (select.appendChild) {
+        select.appendChild(option);
+      }
+    });
+  }
+
+  function heroCaption(motion) {
+    if (motion && motion.last_result) {
+      return String(motion.last_result);
+    }
+    if (!motion || motion.status === "unknown") {
+      return "还没有拿到灯的实时状态，可能是台灯未连接。";
+    }
+    if (motion.status === "idle") {
+      return "灯已在稳定姿态，可以继续互动或切换动作。";
+    }
+    if (motion.status === "running") {
+      return "灯正在执行动作，请等这一段表演完成。";
+    }
+    if (motion.status === "homing") {
+      return "灯正在慢慢回到安全姿态。";
+    }
+    if (motion.status === "error") {
+      return "动作系统需要检查，建议看下方现场信息。";
+    }
+    return "状态已更新。";
+  }
+
+  function renderHardwareNotes(documentRef, motion, light, audio) {
+    renderTokens(
+      byId(documentRef, "hardwareNotes"),
+      [
+        "电机 " + translateMotorConnectivity(motion.motors_connected),
+        translateCalibrationState(motion.calibration_state),
+        "音频输出 " + String(audio.output_device || "未知"),
+        "灯光 " + translateStatus(light.status || "unknown"),
+      ],
+      "还没有硬件提示。"
+    );
+  }
+
+  function renderConnectivityHints(documentRef, reachableUrls) {
+    var hints = [];
+    if (reachableUrls && reachableUrls.length) {
+      hints.push("Pi 屏幕 http://127.0.0.1:8765");
+      hints = hints.concat(reachableUrls.slice(0, 2).map(function (url) {
+        return "同网络设备 " + url;
+      }));
+    }
+    renderTokens(byId(documentRef, "connectivityHints"), hints, "还没有连接建议。");
+  }
+
+  function renderConfigSnippets(documentRef, motion) {
+    renderTokens(
+      byId(documentRef, "configSnippets"),
+      [
+        "LELAMP_DASHBOARD_HOST=" + runtimeMeta.dashboardHost,
+        "LELAMP_DASHBOARD_PORT=" + String(runtimeMeta.dashboardPort),
+        "LELAMP_DASHBOARD_POLL_MS=" + String(runtimeMeta.pollMs),
+        "LELAMP_HOME_RECORDING=" + String(motion.home_recording || "--"),
+        "LELAMP_STARTUP_RECORDING=" + String(motion.startup_recording || "--"),
+      ],
+      "还没有配置片段。"
+    );
+  }
+
+  function renderState(documentRef, state) {
+    var system = state.system || {};
+    var motion = state.motion || {};
+    var light = state.light || {};
+    var audio = state.audio || {};
+    var reachable = system.reachable_urls || [];
+    var connection = reachable.length ? "live" : "offline";
+
+    text(byId(documentRef, "connectionStatus"), translateStatus(connection));
+    text(byId(documentRef, "systemStatus"), translateStatus(system.status || "unknown"));
+    text(byId(documentRef, "activeAction"), translateActionKey(system.active_action));
+    text(byId(documentRef, "lastUpdateTopbar"), formatMs(system.last_update_ms));
+    text(byId(documentRef, "lastUpdate"), formatMs(system.last_update_ms));
+    text(byId(documentRef, "uptimeSeconds"), formatSeconds(system.uptime_s));
+
+    text(byId(documentRef, "motionStatus"), translateMotionStatus(motion.status || "unknown"));
+    text(byId(documentRef, "motionResult"), heroCaption(motion));
+    text(byId(documentRef, "currentRecording"), motion.current_recording || "--");
+    text(byId(documentRef, "lastCompletedRecording"), motion.last_completed_recording || "--");
+    text(byId(documentRef, "homeRecording"), motion.home_recording || "--");
+    text(byId(documentRef, "startupRecording"), motion.startup_recording || "--");
+    text(byId(documentRef, "motorConnectivity"), translateMotorConnectivity(motion.motors_connected));
+    text(byId(documentRef, "calibrationState"), translateCalibrationState(motion.calibration_state));
+
+    text(byId(documentRef, "lightStatus"), translateStatus(light.status || "unknown"));
+    text(byId(documentRef, "lightColor"), formatLightDetail(light));
+
+    text(byId(documentRef, "audioStatus"), translateStatus(audio.status || "unknown"));
+    text(byId(documentRef, "audioVolume"), formatVolume(audio));
+
+    setClassName(byId(documentRef, "connectionStatus"), "status-pill status-pill--" + statusTone(connection));
+    setClassName(byId(documentRef, "systemStatus"), "status-pill status-pill--" + statusTone(system.status || "unknown"));
+
+    populateRecordings(documentRef, motion.available_recordings || []);
+    renderTokens(byId(documentRef, "reachableUrls"), reachable, "还没有可访问地址。");
+    renderTokens(byId(documentRef, "recordingList"), motion.available_recordings || [], "还没有发现动作录制。");
+    renderHardwareNotes(documentRef, motion, light, audio);
+    renderConnectivityHints(documentRef, reachable);
+    renderConfigSnippets(documentRef, motion);
+    renderErrors(byId(documentRef, "errorFeed"), state.errors || []);
+  }
+
+  function pollState(fetchRef, onState) {
+    return fetchRef("/api/state")
+      .then(function (response) {
+        return response.json();
+      })
+      .then(function (state) {
+        onState(state);
+        return state;
+      })
+      .catch(function () {
+        var fallback = {
+          system: { status: "unknown", active_action: null, last_update_ms: 0, reachable_urls: [], uptime_s: 0 },
+          motion: { status: "unknown", available_recordings: [] },
+          light: { status: "unknown", color: null },
+          audio: { status: "unknown", output_device: null, volume_percent: null },
+          errors: [{ code: "ui.poll_failed", message: "状态轮询失败。", severity: "warning", active: true }],
+        };
+        onState(fallback);
+        return fallback;
+      });
+  }
+
+  function loadActions(documentRef, fetchRef) {
+    return fetchRef("/api/actions")
+      .then(function (response) {
+        return response.json();
+      })
+      .then(function (payload) {
+        runtimeMeta.pollMs = payload.poll_ms || runtimeMeta.pollMs;
+        if (payload.config) {
+          runtimeMeta.dashboardHost = payload.config.dashboard_host || runtimeMeta.dashboardHost;
+          runtimeMeta.dashboardPort = payload.config.dashboard_port || runtimeMeta.dashboardPort;
+        }
+        applyActionAvailability(documentRef, payload);
+        populateRecordings(documentRef, payload.recordings || []);
+        return payload;
+      })
+      .catch(function () {
+        var fallback = defaultActionPayload(true);
+        applyActionAvailability(documentRef, fallback);
+        return fallback;
+      });
+  }
+
+  function postJson(fetchRef, url, payload) {
+    return fetchRef(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload ? JSON.stringify(payload) : "{}",
+    })
+      .then(function (response) {
+        if (response && response.json) {
+          return response.json();
+        }
+        return {};
+      })
+      .catch(function () {
+        return {};
+      });
+  }
+
+  function refresh(documentRef, fetchRef) {
+    return loadActions(documentRef, fetchRef).then(function () {
+      return pollState(fetchRef, function (state) {
+        renderState(documentRef, state);
+      });
+    });
+  }
+
+  function wireActions(documentRef, fetchRef) {
+    var recordingSelect = byId(documentRef, "recordingSelect");
+
+    function bind(id, handler) {
+      var node = byId(documentRef, id);
+      if (node && node.addEventListener) {
+        node.addEventListener("click", handler);
+      }
+    }
+
+    bind("startupButton", function () {
+      postJson(fetchRef, "/api/actions/startup").then(function () {
+        return refresh(documentRef, fetchRef);
+      });
+    });
+    bind("playButton", function () {
+      postJson(fetchRef, "/api/actions/play", {
+        name: recordingSelect ? recordingSelect.value : "",
+      }).then(function () {
+        return refresh(documentRef, fetchRef);
+      });
+    });
+    bind("stopButton", function () {
+      postJson(fetchRef, "/api/actions/stop").then(function () {
+        return refresh(documentRef, fetchRef);
+      });
+    });
+    bind("shutdownPoseButton", function () {
+      postJson(fetchRef, "/api/actions/shutdown_pose").then(function () {
+        return refresh(documentRef, fetchRef);
+      });
+    });
+    bind("lightAmberButton", function () {
+      postJson(fetchRef, "/api/lights/solid", { red: 255, green: 178, blue: 91 }).then(function () {
+        return refresh(documentRef, fetchRef);
+      });
+    });
+    bind("lightClearButton", function () {
+      postJson(fetchRef, "/api/lights/clear").then(function () {
+        return refresh(documentRef, fetchRef);
+      });
+    });
+  }
+
+  function start(documentRef, windowRef, fetchRef, pollMs) {
+    wireActions(documentRef, fetchRef);
+    return loadActions(documentRef, fetchRef).then(function (payload) {
+      var effectivePollMs = payload.poll_ms || pollMs;
+      return pollState(fetchRef, function (state) {
+        renderState(documentRef, state);
+      }).then(function () {
+        windowRef.setInterval(function () {
+          pollState(fetchRef, function (state) {
+            renderState(documentRef, state);
+          });
+        }, effectivePollMs);
+        return payload;
+      });
+    });
+  }
+
+  return {
+    applyActionAvailability: applyActionAvailability,
+    loadActions: loadActions,
+    pollState: pollState,
+    renderState: renderState,
+    start: start,
+  };
+}());
+
+window.addEventListener("DOMContentLoaded", function () {
+  DashboardApp.start(document, window, window.fetch.bind(window), 400);
+});
