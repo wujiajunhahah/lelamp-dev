@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1016">
+  <title>LeLamp Local Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="topbar-copy">
+        <p class="eyebrow">LeLamp</p>
+        <h1>Local Mission Console</h1>
+        <p class="subtitle">
+          Warm, local-first control for startup, motion, light, and demo diagnostics across the Pi screen or the same nearby network.
+        </p>
+      </div>
+      <div class="topbar-meta">
+        <div id="connectionStatus" class="status-pill status-pill--offline">offline</div>
+        <div id="systemStatus" class="status-pill status-pill--unknown">unknown</div>
+        <div id="activeAction" class="status-pill">idle</div>
+        <div id="lastUpdateTopbar" class="status-pill">0 ms</div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="left-column">
+        <article class="panel panel--hero">
+          <div class="panel-inner hero-grid">
+            <div class="hero-copy">
+              <div class="hero-label">Current Stance</div>
+              <div id="motionStatus" class="hero-state">unknown</div>
+              <p id="motionResult" class="hero-caption">No motion result yet.</p>
+            </div>
+            <div class="hero-metrics">
+              <div class="metric-card">
+                <span>Light</span>
+                <strong id="lightStatus">unknown</strong>
+                <small id="lightColor">--</small>
+              </div>
+              <div class="metric-card">
+                <span>Audio</span>
+                <strong id="audioStatus">unknown</strong>
+                <small id="audioVolume">--</small>
+              </div>
+              <div class="metric-card">
+                <span>Motors</span>
+                <strong id="motorConnectivity">unknown</strong>
+                <small id="calibrationState">unknown</small>
+              </div>
+              <div class="metric-card">
+                <span>Uptime</span>
+                <strong id="uptimeSeconds">0 s</strong>
+                <small id="lastUpdate">0 ms</small>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-inner">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow eyebrow--panel">Controls</p>
+                <h2>Main Actions</h2>
+              </div>
+              <p class="section-note">All actions serialize through one runtime executor.</p>
+            </div>
+            <div class="control-grid">
+              <button id="startupButton" class="action-button action-button--primary" type="button">Startup</button>
+              <button id="stopButton" class="action-button" type="button">Return Home</button>
+              <div class="recording-picker">
+                <label for="recordingSelect">Motion</label>
+                <select id="recordingSelect"></select>
+              </div>
+              <button id="playButton" class="action-button" type="button">Play Motion</button>
+              <button id="shutdownPoseButton" class="action-button action-button--warn" type="button">Shutdown Pose</button>
+              <button id="lightAmberButton" class="action-button action-button--amber" type="button">Warm Amber</button>
+              <button id="lightClearButton" class="action-button" type="button">Light Off</button>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="right-column">
+        <article class="panel">
+          <div class="panel-inner">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow eyebrow--panel">Realtime</p>
+                <h2>State Snapshot</h2>
+              </div>
+              <p class="section-note">Normalized across runtime, motion, light, and audio.</p>
+            </div>
+            <div class="snapshot-grid">
+              <div class="snapshot-card">
+                <span>Home Recording</span>
+                <strong id="homeRecording">--</strong>
+              </div>
+              <div class="snapshot-card">
+                <span>Startup Recording</span>
+                <strong id="startupRecording">--</strong>
+              </div>
+              <div class="snapshot-card">
+                <span>Current Recording</span>
+                <strong id="currentRecording">--</strong>
+              </div>
+              <div class="snapshot-card">
+                <span>Last Completed</span>
+                <strong id="lastCompletedRecording">--</strong>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article id="diagnosticsPanel" class="panel">
+          <div class="panel-inner diagnostics-stack">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow eyebrow--panel">Diagnostics</p>
+                <h2>Connectivity & Errors</h2>
+              </div>
+              <p class="section-note">Truthful degraded output beats invented certainty.</p>
+            </div>
+
+            <section>
+              <h3>Reachable URLs</h3>
+              <div id="reachableUrls" class="token-list token-list--urls"></div>
+            </section>
+
+            <section>
+              <h3>Available Recordings</h3>
+              <div id="recordingList" class="token-list"></div>
+            </section>
+
+            <section>
+              <h3>Error Feed</h3>
+              <div id="errorFeed" class="error-feed"></div>
+            </section>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>
