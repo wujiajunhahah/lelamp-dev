@@ -1,16 +1,19 @@
-# LeLamp Pi 5 Bring-Up Workspace
+# LeLamp Runtime + Pi Workspace
 
-这个工作区已经不是原始的上游仓库镜像了，而是按你现在的目标收成了一套 `Pi 5 + LeLamp + OpenClaw` 的落地环境。
+这个仓库现在是你维护 LeLamp 的主仓，不再只是一个 `Pi 5 bring-up` 脚手架。
 
-目标很明确：
+它已经把下面这些东西收在同一个地方：
 
-- 你的树莓派到手后尽量只跑一条命令
-- 如果还是空白卡，先在宿主机上一条命令种好 bootfs
-- 自动判断当前设备是不是 `Pi 5`
-- 自动走最安全的 `ReSpeaker` 配置路径
-- 自动准备 `LeLamp Runtime`
-- 自动准备 `OpenClaw`
-- 自动准备 `systemd` 服务和重启后的收尾检查
+- `Pi 5 + ReSpeaker + OpenClaw` 的装机与 bring-up
+- [`lelamp_runtime/`](./lelamp_runtime/) 里的动作、姿态、控制 CLI 和本地 dashboard
+- 从开发机同步到树莓派的脚本、现场演示入口和维护文档
+
+当前最常用的入口是：
+
+- 首次空白卡自举：[`host_tools/pi5_zero_touch_seed.sh`](./host_tools/pi5_zero_touch_seed.sh)
+- Pi 上一键安装：[`lelamp_runtime/scripts/pi5_all_in_one.sh`](./lelamp_runtime/scripts/pi5_all_in_one.sh)
+- 日常运行时维护：[`lelamp_runtime/`](./lelamp_runtime/)
+- 同步最新 runtime 到树莓派：`cd lelamp_runtime && START_DASHBOARD=1 ./scripts/sync_pi_runtime.sh`
 
 ## GitHub Pages
 
