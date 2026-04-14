@@ -272,7 +272,7 @@ def _handle_startup(args) -> int:
         robot.connect(calibrate=False)
         _set_torque_enabled(robot, True)
 
-        current_raw = robot.bus.sync_read("Present_Position")
+        current_raw = robot.bus.sync_read("Present_Position", normalize=True, num_retry=2)
         current_pose = {f"{joint}.pos": value for joint, value in current_raw.items()}
         startup_frames = build_dynamic_startup_actions(
             current_pose,
@@ -327,7 +327,7 @@ def _handle_shutdown(args) -> int:
         robot.connect(calibrate=False)
         _set_torque_enabled(robot, True)
 
-        current_raw = robot.bus.sync_read("Present_Position")
+        current_raw = robot.bus.sync_read("Present_Position", normalize=True, num_retry=2)
         current_pose = {f"{joint}.pos": value for joint, value in current_raw.items()}
         shutdown_frames = build_staged_shutdown_actions(
             current_pose,

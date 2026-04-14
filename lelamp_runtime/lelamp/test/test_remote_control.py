@@ -430,6 +430,99 @@ class RemoteControlConfigTests(unittest.TestCase):
         self.assertTrue(FakeFollower.instances)
         self.assertTrue(FakeFollower.instances[0].actions)
 
+    def test_handle_shutdown_reads_present_position_in_normalized_space(self) -> None:
+        class FakeBus:
+            def __init__(self) -> None:
+                self.is_connected = True
+                self.sync_read_calls = []
+                self.goal_writes = []
+                self.torque_writes = []
+                self.disconnected = False
+
+            def sync_read(self, register, **kwargs):
+                self.sync_read_calls.append((register, kwargs))
+                return {
+                    "base_yaw": 1.0,
+                    "base_pitch": 2.0,
+                    "elbow_pitch": 3.0,
+                    "wrist_roll": 4.0,
+                    "wrist_pitch": 5.0,
+                }
+
+            def write(self, register, joint, value) -> None:
+                self.torque_writes.append((register, joint, value))
+
+            def disconnect(self, disable_torque=False) -> None:
+                self.disconnected = True
+                self.is_connected = False
+
+        class FakeFollower:
+            instances: list["FakeFollower"] = []
+
+            def __init__(self, _config) -> None:
+                self.bus = FakeBus()
+                FakeFollower.instances.append(self)
+
+            def connect(self, calibrate=False) -> None:
+                self.bus.is_connected = True
+
+            def send_action(self, action) -> None:
+                self.bus.goal_writes.append(action)
+
+        class FakeFollowerConfig:
+            def __init__(self, **kwargs) -> None:
+                self.kwargs = kwargs
+
+        from lelamp import remote_control
+
+        args = SimpleNamespace(
+            port="/dev/ttyACM0",
+            id="lelamp",
+            recording="power_off",
+            prepare_fraction=0.22,
+            prepare_frames=1,
+            settle_frames=1,
+            hold_frames=0,
+            fps=12,
+            final_hold=0.0,
+            release_pause=0.0,
+            keep_led_on=True,
+            enable_rgb=False,
+            led_count=40,
+            led_pin=12,
+            led_freq_hz=800000,
+            led_dma=10,
+            led_brightness=255,
+            led_invert=False,
+            led_channel=0,
+        )
+
+        fake_follower_module = types.ModuleType("lelamp.follower")
+        fake_follower_module.LeLampFollower = FakeFollower
+        fake_follower_module.LeLampFollowerConfig = FakeFollowerConfig
+
+        with patch.dict(sys.modules, {"lelamp.follower": fake_follower_module}, clear=False), patch.object(
+            remote_control,
+            "_load_first_pose",
+            return_value={
+                "base_yaw.pos": 1.0,
+                "base_pitch.pos": 2.0,
+                "elbow_pitch.pos": 3.0,
+                "wrist_roll.pos": 4.0,
+                "wrist_pitch.pos": 5.0,
+            },
+        ), patch.object(remote_control.time, "sleep", return_value=None):
+            result = remote_control._handle_shutdown(args)
+
+        self.assertEqual(result, 0)
+        self.assertTrue(FakeFollower.instances)
+        bus = FakeFollower.instances[0].bus
+        self.assertEqual(
+            bus.sync_read_calls,
+            [("Present_Position", {"normalize": True, "num_retry": 2})],
+        )
+        self.assertTrue(bus.disconnected)
+
 
 if __name__ == "__main__":
     unittest.main()
