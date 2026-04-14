@@ -146,20 +146,21 @@ class DashboardRuntimeBridge:
         return DashboardActionResult(True, "Cleared RGB LEDs")
 
     def _run_remote(self, handler, **overrides: Any) -> DashboardActionResult:
-        args = SimpleNamespace(
-            id=self.settings.lamp_id,
-            port=self.settings.port,
-            fps=self.settings.fps,
-            enable_rgb=self.settings.enable_rgb,
-            led_count=self.settings.led_count,
-            led_pin=self.settings.led_pin,
-            led_freq_hz=self.settings.led_freq_hz,
-            led_dma=self.settings.led_dma,
-            led_brightness=self.settings.led_brightness,
-            led_invert=self.settings.led_invert,
-            led_channel=self.settings.led_channel,
-            **overrides,
-        )
+        payload = {
+            "id": self.settings.lamp_id,
+            "port": self.settings.port,
+            "fps": self.settings.fps,
+            "enable_rgb": self.settings.enable_rgb,
+            "led_count": self.settings.led_count,
+            "led_pin": self.settings.led_pin,
+            "led_freq_hz": self.settings.led_freq_hz,
+            "led_dma": self.settings.led_dma,
+            "led_brightness": self.settings.led_brightness,
+            "led_invert": self.settings.led_invert,
+            "led_channel": self.settings.led_channel,
+        }
+        payload.update(overrides)
+        args = SimpleNamespace(**payload)
 
         try:
             exit_code = handler(args)

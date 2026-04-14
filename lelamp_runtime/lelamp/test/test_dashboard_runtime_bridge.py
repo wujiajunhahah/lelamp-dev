@@ -209,6 +209,41 @@ class DashboardRuntimeBridgeTests(unittest.TestCase):
         self.assertIn("failed", result.message.lower())
         self.assertIn("remote crashed", result.detail)
 
+    def test_shutdown_pose_uses_shutdown_fps_override_without_duplicate_keyword_error(self) -> None:
+        settings = self._make_settings()
+        captured = {}
+
+        def handle_shutdown(args) -> int:
+            captured["fps"] = args.fps
+            captured["recording"] = args.recording
+            captured["keep_led_on"] = args.keep_led_on
+            return 0
+
+        remote_module = SimpleNamespace(
+            _handle_shutdown=handle_shutdown,
+            DEFAULT_SHUTDOWN_PREPARE_FRACTION=0.22,
+            DEFAULT_SHUTDOWN_PREPARE_FRAMES=10,
+            DEFAULT_SHUTDOWN_SETTLE_FRAMES=16,
+            DEFAULT_SHUTDOWN_HOLD_FRAMES=8,
+            DEFAULT_SHUTDOWN_FPS=12,
+            DEFAULT_SHUTDOWN_FINAL_HOLD_SECONDS=1.0,
+            DEFAULT_RELEASE_PAUSE_SECONDS=0.8,
+        )
+
+        bridge = DashboardRuntimeBridge(
+            settings,
+            animation_factory=FakeAnimationService,
+            rgb_factory=FakeRGBService,
+            remote_module=remote_module,
+        )
+
+        result = bridge.shutdown_pose()
+
+        self.assertTrue(result.ok)
+        self.assertEqual(captured["fps"], 12)
+        self.assertEqual(captured["recording"], "power_off")
+        self.assertFalse(captured["keep_led_on"])
+
     def test_set_light_solid_dispatches_rgb_event_and_keeps_state(self) -> None:
         settings = self._make_settings()
 
