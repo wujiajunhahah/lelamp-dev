@@ -108,6 +108,34 @@ class DashboardActionExecutorTests(unittest.TestCase):
         self.assertIsNone(snapshot["light"]["color"])
         self.assertEqual(snapshot["light"]["last_result"], "cleared")
 
+    def test_submit_success_preserves_existing_degraded_system_status(self) -> None:
+        store = DashboardStateStore()
+        store.patch(
+            "audio",
+            {
+                "status": "warning",
+                "output_device": None,
+                "volume_percent": None,
+                "last_result": "amixer unavailable",
+            },
+        )
+        executor = DashboardActionExecutor(store)
+
+        receipt = executor.submit(
+            "stop",
+            lambda: DashboardActionResult(True, "home"),
+            section="motion",
+            success_patch={"status": "idle"},
+        )
+
+        self.assertTrue(receipt.ok)
+        self.assertTrue(executor.wait_for_idle(timeout=1.0))
+
+        snapshot = store.snapshot()
+        self.assertEqual(snapshot["system"]["status"], "warning")
+        self.assertEqual(snapshot["audio"]["status"], "warning")
+        self.assertEqual(snapshot["motion"]["status"], "idle")
+
     def test_submit_records_error_when_action_returns_failed_result(self) -> None:
         store = DashboardStateStore()
         executor = DashboardActionExecutor(store)

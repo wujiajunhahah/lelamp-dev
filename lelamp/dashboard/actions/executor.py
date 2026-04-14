@@ -129,4 +129,6 @@ class DashboardActionExecutor:
                 self._store.record_error(*error_payload)
 
             self._store.patch(section, section_patch)
-            self._store.set_system(status=system_status, active_action=None)
+            self._store.reconcile_system(
+                {"status": system_status, "active_action": None}
+            )
