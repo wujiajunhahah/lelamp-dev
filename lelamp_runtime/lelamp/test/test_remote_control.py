@@ -72,6 +72,84 @@ class RemoteControlConfigTests(unittest.TestCase):
         self.assertEqual(args.name, "home_safe")
         self.assertTrue(args.set_defaults)
 
+    def test_handle_capture_pose_set_defaults_updates_idle_and_home_only(self) -> None:
+        class FakeBus:
+            def __init__(self) -> None:
+                self.is_connected = False
+
+            def connect(self) -> None:
+                self.is_connected = True
+
+            def sync_read(self, *_args, **_kwargs):
+                return {
+                    "base_yaw": 3.071017,
+                    "base_pitch": 30.995671,
+                    "elbow_pitch": 32.141337,
+                    "wrist_roll": 96.923077,
+                    "wrist_pitch": 70.990468,
+                }
+
+            def disconnect(self, disable_torque=False) -> None:
+                self.is_connected = False
+
+        class FakeFollower:
+            def __init__(self, _config) -> None:
+                self.bus = FakeBus()
+
+        class FakeFollowerConfig:
+            def __init__(self, **kwargs) -> None:
+                self.kwargs = kwargs
+
+        from lelamp import remote_control
+
+        fake_follower_module = types.ModuleType("lelamp.follower")
+        fake_follower_module.LeLampFollower = FakeFollower
+        fake_follower_module.LeLampFollowerConfig = FakeFollowerConfig
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
+            sys.modules,
+            {"lelamp.follower": fake_follower_module},
+            clear=False,
+        ), patch.object(remote_control, "write_static_recording", return_value=Path(tmp_dir, "home_safe.csv")):
+            env_path = Path(tmp_dir, ".env")
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "LELAMP_STARTUP_RECORDING=wake_up",
+                        "LELAMP_IDLE_RECORDING=idle",
+                        "LELAMP_HOME_RECORDING=idle",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                port="/dev/ttyACM0",
+                id="lelamp",
+                fps=30,
+                frame_count=3,
+                name="home_safe",
+                env_file=str(env_path),
+                set_defaults=True,
+            )
+
+            result = remote_control._handle_capture_pose(args)
+            env_contents = env_path.read_text(encoding="utf-8")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            env_contents,
+            "\n".join(
+                [
+                    "LELAMP_STARTUP_RECORDING=wake_up",
+                    "LELAMP_IDLE_RECORDING=home_safe",
+                    "LELAMP_HOME_RECORDING=home_safe",
+                    "LELAMP_USE_HOME_POSE_RELATIVE=true",
+                    "",
+                ]
+            ),
+        )
+
     def test_build_parser_supports_startup_and_shutdown_commands(self) -> None:
         fake_motors_module = types.ModuleType("lelamp.service.motors.motors_service")
         fake_motors_module.MotorsService = object
@@ -163,6 +241,98 @@ class RemoteControlConfigTests(unittest.TestCase):
         self.assertEqual(service.dispatched, [("play", "curious")])
         self.assertEqual(service.wait_timeout, 12.0)
         self.assertTrue(service.stopped)
+
+    def test_handle_startup_continues_when_rgb_init_fails(self) -> None:
+        class FakeBus:
+            def __init__(self) -> None:
+                self.is_connected = True
+
+            def sync_read(self, *_args, **_kwargs):
+                return {
+                    "base_yaw": 1.0,
+                    "base_pitch": 2.0,
+                    "elbow_pitch": 3.0,
+                    "wrist_roll": 4.0,
+                    "wrist_pitch": 5.0,
+                }
+
+            def write(self, *_args, **_kwargs) -> None:
+                return None
+
+        class FakeFollower:
+            instances: list["FakeFollower"] = []
+
+            def __init__(self, _config) -> None:
+                self.bus = FakeBus()
+                self.is_connected = False
+                self.actions = []
+                FakeFollower.instances.append(self)
+
+            def connect(self, calibrate=False) -> None:
+                self.is_connected = True
+
+            def send_action(self, action) -> None:
+                self.actions.append(action)
+
+            def disconnect(self) -> None:
+                self.is_connected = False
+
+        class FakeFollowerConfig:
+            def __init__(self, **kwargs) -> None:
+                self.kwargs = kwargs
+
+        class FakeRgbInitError(RuntimeError):
+            pass
+
+        from lelamp import remote_control
+
+        args = SimpleNamespace(
+            port="/dev/ttyACM0",
+            id="lelamp",
+            recording="wake_up",
+            home_recording="home_safe",
+            settle_frames=1,
+            settle_hold_frames=1,
+            return_frames=1,
+            final_hold_frames=1,
+            settle_fps=15,
+            wake_fps=30,
+            post_wake_hold=0.0,
+            enable_rgb=True,
+            led_count=40,
+            led_pin=12,
+            led_freq_hz=800000,
+            led_dma=10,
+            led_brightness=255,
+            led_invert=False,
+            led_channel=0,
+        )
+
+        fake_follower_module = types.ModuleType("lelamp.follower")
+        fake_follower_module.LeLampFollower = FakeFollower
+        fake_follower_module.LeLampFollowerConfig = FakeFollowerConfig
+
+        with patch.dict(sys.modules, {"lelamp.follower": fake_follower_module}, clear=False), patch.object(
+            remote_control,
+            "_build_rgb_service",
+            side_effect=FakeRgbInitError("rgb boom"),
+        ), patch.object(
+            remote_control,
+            "_load_first_pose",
+            return_value={"base_yaw.pos": 1.0, "base_pitch.pos": 2.0, "elbow_pitch.pos": 3.0, "wrist_roll.pos": 4.0, "wrist_pitch.pos": 5.0},
+        ), patch.object(
+            remote_control,
+            "_load_recording_actions",
+            return_value=[
+                {"base_yaw.pos": 1.0, "base_pitch.pos": 2.0, "elbow_pitch.pos": 3.0, "wrist_roll.pos": 4.0, "wrist_pitch.pos": 5.0},
+                {"base_yaw.pos": 2.0, "base_pitch.pos": 3.0, "elbow_pitch.pos": 4.0, "wrist_roll.pos": 5.0, "wrist_pitch.pos": 6.0},
+            ],
+        ), patch.object(remote_control.time, "sleep", return_value=None):
+            result = remote_control._handle_startup(args)
+
+        self.assertEqual(result, 0)
+        self.assertTrue(FakeFollower.instances)
+        self.assertTrue(FakeFollower.instances[0].actions)
 
 
 if __name__ == "__main__":

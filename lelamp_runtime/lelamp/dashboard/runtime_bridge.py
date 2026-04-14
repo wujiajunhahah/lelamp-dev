@@ -54,11 +54,13 @@ class DashboardRuntimeBridge:
             self.remote_module._handle_startup,
             recording=self.settings.startup_recording,
             home_recording=self.settings.home_recording,
-            settle_frames=self.remote_module.DEFAULT_STARTUP_SETTLE_FRAMES,
-            settle_hold_frames=self.remote_module.DEFAULT_STARTUP_HOLD_FRAMES,
-            settle_fps=self.remote_module.DEFAULT_STARTUP_FPS,
-            wake_fps=self.remote_module.DEFAULT_WAKE_FPS,
-            post_wake_hold=self.remote_module.DEFAULT_POST_WAKE_HOLD_SECONDS,
+            settle_frames=getattr(self.remote_module, "DEFAULT_STARTUP_SETTLE_FRAMES", 18),
+            settle_hold_frames=getattr(self.remote_module, "DEFAULT_STARTUP_HOLD_FRAMES", 10),
+            return_frames=getattr(self.remote_module, "DEFAULT_STARTUP_RETURN_FRAMES", 10),
+            final_hold_frames=getattr(self.remote_module, "DEFAULT_STARTUP_FINAL_HOLD_FRAMES", 4),
+            settle_fps=getattr(self.remote_module, "DEFAULT_STARTUP_FPS", 15),
+            wake_fps=getattr(self.remote_module, "DEFAULT_WAKE_FPS", 30),
+            post_wake_hold=getattr(self.remote_module, "DEFAULT_POST_WAKE_HOLD_SECONDS", 0.8),
         )
 
     def play(self, recording_name: str) -> DashboardActionResult:

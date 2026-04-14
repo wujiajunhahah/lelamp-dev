@@ -132,6 +132,8 @@ class MotionProfilesTests(unittest.TestCase):
             wake_up_actions,
             settle_frame_count=1,
             settle_hold_frames=1,
+            return_frame_count=1,
+            final_hold_frames=1,
         )
 
         self.assertEqual(
@@ -173,6 +175,17 @@ class MotionProfilesTests(unittest.TestCase):
                 "wrist_pitch.pos": 55.0,
             },
         )
+        self.assertEqual(
+            frames[4],
+            {
+                "base_yaw.pos": -1.0,
+                "base_pitch.pos": 20.0,
+                "elbow_pitch.pos": 30.0,
+                "wrist_roll.pos": 40.0,
+                "wrist_pitch.pos": 50.0,
+            },
+        )
+        self.assertEqual(frames[-1], frames[4])
 
     def test_build_parallel_transition_moves_all_active_joints_together(self) -> None:
         start_pose = {

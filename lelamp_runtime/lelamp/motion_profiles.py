@@ -130,6 +130,8 @@ def build_dynamic_startup_actions(
     settle_joints: tuple[str, ...] = STARTUP_ACTIVE_JOINTS,
     settle_frame_count: int = 12,
     settle_hold_frames: int = 6,
+    return_frame_count: int = 10,
+    final_hold_frames: int = 4,
 ) -> list[dict[str, float]]:
     startup_anchor = home_pose.copy()
     startup_anchor["base_yaw.pos"] = current_pose.get(
@@ -149,9 +151,21 @@ def build_dynamic_startup_actions(
 
     if settle_hold_frames < 0:
         raise ValueError("settle_hold_frames must be non-negative")
+    if return_frame_count <= 0:
+        raise ValueError("return_frame_count must be positive")
+    if final_hold_frames < 0:
+        raise ValueError("final_hold_frames must be non-negative")
 
     hold_frames = [startup_anchor.copy() for _ in range(settle_hold_frames)]
-    return settle_frames + hold_frames + wake_up_frames
+    wake_return_start = wake_up_frames[-1] if wake_up_frames else startup_anchor
+    return_frames = build_parallel_transition(
+        wake_return_start,
+        startup_anchor,
+        joints=settle_joints,
+        frame_count=return_frame_count,
+    )
+    final_hold = [startup_anchor.copy() for _ in range(final_hold_frames)]
+    return settle_frames + hold_frames + wake_up_frames + return_frames + final_hold
 
 
 def build_staged_shutdown_actions(

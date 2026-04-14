@@ -24,6 +24,8 @@ DEFAULT_STARTUP_HOLD_FRAMES = 10
 DEFAULT_STARTUP_FPS = 15
 DEFAULT_WAKE_FPS = 30
 DEFAULT_POST_WAKE_HOLD_SECONDS = 0.8
+DEFAULT_STARTUP_RETURN_FRAMES = 10
+DEFAULT_STARTUP_FINAL_HOLD_FRAMES = 4
 DEFAULT_SHUTDOWN_PREPARE_FRACTION = 0.22
 DEFAULT_SHUTDOWN_PREPARE_FRAMES = 10
 DEFAULT_SHUTDOWN_SETTLE_FRAMES = 16
@@ -43,6 +45,17 @@ def _build_rgb_service(args) -> RGBService:
         led_invert=args.led_invert,
         led_channel=args.led_channel,
     )
+
+
+def _try_build_rgb_service(args, *, context: str) -> RGBService | None:
+    if not args.enable_rgb:
+        return None
+
+    try:
+        return _build_rgb_service(args)
+    except Exception as exc:
+        print(f"RGB unavailable during {context}: {exc}")
+        return None
 
 
 def _build_animation_service(args) -> AnimationService:
@@ -199,7 +212,6 @@ def _handle_capture_pose(args) -> int:
     if args.set_defaults:
         env_path = Path(args.env_file)
         upsert_env_value(env_path, "LELAMP_IDLE_RECORDING", args.name)
-        upsert_env_value(env_path, "LELAMP_STARTUP_RECORDING", args.name)
         upsert_env_value(env_path, "LELAMP_HOME_RECORDING", args.name)
         upsert_env_value(env_path, "LELAMP_USE_HOME_POSE_RELATIVE", "true")
         print(f"Updated defaults in {env_path}")
@@ -222,7 +234,7 @@ def _handle_startup(args) -> int:
         )
     )
 
-    rgb_service: RGBService | None = _build_rgb_service(args) if args.enable_rgb else None
+    rgb_service = _try_build_rgb_service(args, context="startup")
 
     try:
         robot.connect(calibrate=False)
@@ -236,6 +248,8 @@ def _handle_startup(args) -> int:
             wake_up_actions,
             settle_frame_count=args.settle_frames,
             settle_hold_frames=args.settle_hold_frames,
+            return_frame_count=args.return_frames,
+            final_hold_frames=args.final_hold_frames,
         )
 
         if rgb_service is not None:
@@ -271,7 +285,7 @@ def _handle_shutdown(args) -> int:
             disable_torque_on_disconnect=False,
         )
     )
-    rgb_service: RGBService | None = _build_rgb_service(args) if args.enable_rgb else None
+    rgb_service = _try_build_rgb_service(args, context="shutdown")
 
     try:
         robot.connect(calibrate=False)
@@ -358,7 +372,7 @@ def build_parser() -> argparse.ArgumentParser:
     capture_pose.add_argument("name", help="Recording name to write")
     capture_pose.add_argument("--frame-count", type=int, default=30, help="Number of identical frames to write")
     capture_pose.add_argument("--env-file", default=".env", help="Env file to update when --set-defaults is used")
-    capture_pose.add_argument("--set-defaults", action="store_true", help="Also set idle/startup recording defaults")
+    capture_pose.add_argument("--set-defaults", action="store_true", help="Also set idle/home recording defaults")
     capture_pose.set_defaults(handler=_handle_capture_pose)
 
     startup = subparsers.add_parser("startup", help="Run the formal startup choreography")
@@ -366,6 +380,8 @@ def build_parser() -> argparse.ArgumentParser:
     startup.add_argument("--home-recording", default=settings.home_recording, help="Static pose used as the startup anchor")
     startup.add_argument("--settle-frames", type=int, default=DEFAULT_STARTUP_SETTLE_FRAMES, help="Frame count for the slow startup settle")
     startup.add_argument("--settle-hold-frames", type=int, default=DEFAULT_STARTUP_HOLD_FRAMES, help="How many startup anchor frames to hold before wake-up")
+    startup.add_argument("--return-frames", type=int, default=DEFAULT_STARTUP_RETURN_FRAMES, help="How many frames to return from wake-up back to home_safe")
+    startup.add_argument("--final-hold-frames", type=int, default=DEFAULT_STARTUP_FINAL_HOLD_FRAMES, help="How many final home_safe frames to hold after startup")
     startup.add_argument("--settle-fps", type=int, default=DEFAULT_STARTUP_FPS, help="FPS used during the settle phase")
     startup.add_argument("--wake-fps", type=int, default=DEFAULT_WAKE_FPS, help="FPS used while replaying the wake-up recording")
     startup.add_argument("--post-wake-hold", type=float, default=DEFAULT_POST_WAKE_HOLD_SECONDS, help="Seconds to hold after wake-up")

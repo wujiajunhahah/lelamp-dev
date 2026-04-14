@@ -4,6 +4,7 @@ import time
 import threading
 from typing import Any, List, Dict, Optional, Tuple
 from lelamp.follower import LeLampFollowerConfig, LeLampFollower
+from lelamp.motion_profiles import transform_actions_relative_to_pose
 
 
 class AnimationService:
@@ -243,6 +244,11 @@ class AnimationService:
                     # Extract action data (exclude timestamp column)
                     action = {key: float(value) for key, value in row.items() if key != 'timestamp'}
                     actions.append(action)
+
+            if self.use_home_pose_relative and recording_name != self.home_recording and actions:
+                home_actions = self._load_recording(self.home_recording)
+                home_pose = home_actions[0] if home_actions else None
+                actions = transform_actions_relative_to_pose(actions, home_pose)
             
             # Cache the recording
             self._recording_cache[recording_name] = actions
