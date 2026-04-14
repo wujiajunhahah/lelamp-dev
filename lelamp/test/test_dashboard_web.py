@@ -17,6 +17,17 @@ class DashboardWebTests(unittest.TestCase):
         self.assertIn('id="shutdownPoseButton"', html)
         self.assertIn('id="diagnosticsPanel"', html)
         self.assertIn('id="recordingList"', html)
+        self.assertIn('id="hardwareNotes"', html)
+        self.assertIn('id="connectivityHints"', html)
+        self.assertIn('id="configSnippets"', html)
+
+    def test_dashboard_css_contains_responsive_layout_rules(self) -> None:
+        css = (ROOT / "dashboard.css").read_text(encoding="utf-8")
+
+        self.assertIn("@media (max-width: 1120px)", css)
+        self.assertIn("@media (max-width: 760px)", css)
+        self.assertIn(".layout", css)
+        self.assertIn("grid-template-columns: 1fr;", css)
 
     def test_dashboard_js_starts_polling_at_400ms(self) -> None:
         source_path = ROOT / "dashboard.js"
@@ -64,12 +75,12 @@ context.fetch = function (url) {{
           recordings: ["curious"],
           poll_ms: 400,
           actions: {{
-            startup: {{ enabled: true }},
-            play: {{ enabled: true }},
-            stop: {{ enabled: true }},
-            shutdown_pose: {{ enabled: true }},
-            light_solid: {{ enabled: true }},
-            light_clear: {{ enabled: true }},
+            startup: {{ enabled: true, state: "enabled", label: "Startup" }},
+            play: {{ enabled: true, state: "enabled", label: "Play Motion" }},
+            stop: {{ enabled: true, state: "enabled", label: "Return Home" }},
+            shutdown_pose: {{ enabled: true, state: "enabled", label: "Shutdown Pose" }},
+            light_solid: {{ enabled: true, state: "enabled", label: "Warm Amber" }},
+            light_clear: {{ enabled: true, state: "enabled", label: "Light Off" }},
           }},
         }});
       }},
@@ -119,6 +130,7 @@ Promise.resolve(context.DashboardApp.start(context.document, context.window, con
     console.log(JSON.stringify({{
       intervalMs: context.window.intervalMs,
       pollCalls,
+      startupLabel: nodes.startupButton.textContent,
     }}));
   }})
   .catch(function (error) {{
@@ -138,6 +150,119 @@ Promise.resolve(context.DashboardApp.start(context.document, context.window, con
         payload = json.loads(result.stdout.strip())
         self.assertEqual(payload["intervalMs"], 400)
         self.assertEqual(payload["pollCalls"], ["/api/actions", "/api/state"])
+        self.assertEqual(payload["startupLabel"], "Startup")
+
+    def test_dashboard_js_disables_controls_when_action_catalog_fails_and_resyncs_recordings_from_state(self) -> None:
+        source_path = ROOT / "dashboard.js"
+        script = f"""
+const fs = require("fs");
+const vm = require("vm");
+
+const source = fs.readFileSync({json.dumps(str(source_path))}, "utf8");
+const nodes = {{}};
+
+function createNode(id) {{
+  return {{
+    id,
+    textContent: "",
+    disabled: false,
+    value: "",
+    innerHTML: "",
+    children: [],
+    addEventListener: function () {{}},
+    appendChild: function (child) {{
+      this.children.push(child);
+      if (typeof child.value !== "undefined") {{
+        this.value = child.value;
+      }}
+    }},
+  }};
+}}
+
+const context = {{
+  console,
+  Promise,
+  JSON,
+  setTimeout,
+  clearTimeout,
+}};
+
+context.fetch = function (url) {{
+  if (url === "/api/actions") {{
+    return Promise.reject(new Error("offline"));
+  }}
+  return Promise.resolve({{
+    json: function () {{
+      return Promise.resolve({{
+        system: {{ status: "ready", active_action: null, last_update_ms: 0, reachable_urls: ["http://127.0.0.1:8765"], uptime_s: 3 }},
+        motion: {{
+          status: "idle",
+          available_recordings: ["curious"],
+          current_recording: null,
+          last_completed_recording: null,
+          home_recording: "home_safe",
+          startup_recording: "wake_up",
+          motors_connected: "unknown",
+          calibration_state: "unknown",
+          last_result: null
+        }},
+        light: {{ status: "off", color: null }},
+        audio: {{ status: "ready", output_device: "Line", volume_percent: 64 }},
+        errors: []
+      }});
+    }}
+  }});
+}};
+
+context.window = {{
+  intervalMs: null,
+  setInterval: function (_fn, ms) {{ this.intervalMs = ms; }},
+  addEventListener: function () {{}},
+  fetch: null,
+}};
+
+context.document = {{
+  getElementById: function (id) {{
+    if (!nodes[id]) {{
+      nodes[id] = createNode(id);
+    }}
+    return nodes[id];
+  }},
+  createElement: function () {{
+    return createNode("option");
+  }},
+}};
+
+context.window.fetch = context.fetch;
+vm.createContext(context);
+vm.runInContext(source, context);
+
+Promise.resolve(context.DashboardApp.start(context.document, context.window, context.fetch, 400))
+  .then(function () {{
+    console.log(JSON.stringify({{
+      startupDisabled: nodes.startupButton.disabled,
+      playDisabled: nodes.playButton.disabled,
+      recordings: nodes.recordingSelect.children.map(function (child) {{ return child.value; }}),
+    }}));
+  }})
+  .catch(function (error) {{
+    console.error(error && error.stack ? error.stack : String(error));
+    process.exit(1);
+  }});
+"""
+
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout.strip())
+        self.assertTrue(payload["startupDisabled"])
+        self.assertTrue(payload["playDisabled"])
+        self.assertEqual(payload["recordings"], ["curious"])
 
 
 if __name__ == "__main__":

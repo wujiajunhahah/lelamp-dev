@@ -24,6 +24,41 @@ from lelamp.runtime_config import load_runtime_settings
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
+_ACTION_META = {
+    "startup": {
+        "label": "Startup",
+        "running_label": "Starting...",
+        "section": "motion",
+    },
+    "play": {
+        "label": "Play Motion",
+        "running_label": "Playing {name}...",
+        "disabled_label": "No Motion Loaded",
+        "section": "motion",
+        "requires_recordings": True,
+    },
+    "stop": {
+        "label": "Return Home",
+        "running_label": "Returning Home...",
+        "section": "motion",
+    },
+    "shutdown_pose": {
+        "label": "Shutdown Pose",
+        "running_label": "Entering Shutdown Pose...",
+        "section": "motion",
+    },
+    "light_solid": {
+        "label": "Warm Amber",
+        "running_label": "Setting Warm Amber...",
+        "section": "light",
+    },
+    "light_clear": {
+        "label": "Light Off",
+        "running_label": "Clearing Light...",
+        "section": "light",
+    },
+}
+
 
 def _receipt_response(receipt: Any) -> JSONResponse:
     status_code = 202
@@ -32,6 +67,81 @@ def _receipt_response(receipt: Any) -> JSONResponse:
     elif not receipt.ok:
         status_code = 500
     return JSONResponse(status_code=status_code, content=dict(vars(receipt)))
+
+
+def _catalog_action_key(active_action: str | None) -> str | None:
+    if active_action is None:
+        return None
+    if active_action.startswith("play:"):
+        return "play"
+    if active_action == "light:solid":
+        return "light_solid"
+    if active_action == "light:clear":
+        return "light_clear"
+    return active_action
+
+
+def _running_label(action_key: str, active_action: str | None) -> str:
+    meta = _ACTION_META[action_key]
+    running_label = meta["running_label"]
+    if action_key == "play" and active_action and ":" in active_action:
+        return running_label.format(name=active_action.split(":", 1)[1])
+    return running_label
+
+
+def _action_catalog(
+    snapshot: dict[str, object],
+    recordings: list[str],
+    *,
+    busy: bool,
+    active_action: str | None,
+) -> dict[str, dict[str, object]]:
+    active_key = _catalog_action_key(active_action)
+    motion_status = snapshot.get("motion", {}).get("status", "unknown")
+    light_status = snapshot.get("light", {}).get("status", "unknown")
+    catalog: dict[str, dict[str, object]] = {}
+
+    for action_key, meta in _ACTION_META.items():
+        section_status = motion_status if meta["section"] == "motion" else light_status
+
+        if busy:
+            if action_key == active_key:
+                catalog[action_key] = {
+                    "enabled": False,
+                    "state": "running",
+                    "label": _running_label(action_key, active_action),
+                }
+            else:
+                catalog[action_key] = {
+                    "enabled": False,
+                    "state": "disabled",
+                    "label": "Busy",
+                }
+            continue
+
+        if meta.get("requires_recordings") and not recordings:
+            catalog[action_key] = {
+                "enabled": False,
+                "state": "disabled",
+                "label": meta["disabled_label"],
+            }
+            continue
+
+        if section_status == "error":
+            catalog[action_key] = {
+                "enabled": True,
+                "state": "error",
+                "label": "Motion Error" if meta["section"] == "motion" else "Light Error",
+            }
+            continue
+
+        catalog[action_key] = {
+            "enabled": True,
+            "state": "enabled",
+            "label": meta["label"],
+        }
+
+    return catalog
 
 
 def create_app(
@@ -82,19 +192,29 @@ def create_app(
     @app.get("/api/actions")
     def get_actions() -> dict[str, object]:
         busy = executor.is_busy()
+        active_action = executor.current_action()
+        snapshot = store.snapshot()
+        try:
+            recordings = bridge.list_recordings()
+        except Exception:
+            recordings = list(snapshot.get("motion", {}).get("available_recordings", []))
+
         return {
             "busy": busy,
-            "active_action": executor.current_action(),
-            "recordings": bridge.list_recordings(),
+            "active_action": active_action,
+            "recordings": recordings,
             "poll_ms": settings.dashboard_poll_ms,
-            "actions": {
-                "startup": {"enabled": not busy},
-                "play": {"enabled": not busy},
-                "stop": {"enabled": not busy},
-                "shutdown_pose": {"enabled": not busy},
-                "light_solid": {"enabled": not busy},
-                "light_clear": {"enabled": not busy},
+            "config": {
+                "dashboard_host": settings.dashboard_host,
+                "dashboard_port": settings.dashboard_port,
+                "poll_ms": settings.dashboard_poll_ms,
             },
+            "actions": _action_catalog(
+                snapshot,
+                recordings,
+                busy=busy,
+                active_action=active_action,
+            ),
         }
 
     @app.post("/api/actions/startup")
@@ -121,6 +241,13 @@ def create_app(
         required = ("red", "green", "blue")
         if any(channel not in payload for channel in required):
             raise HTTPException(status_code=400, detail="Missing RGB channel value.")
+        if any(
+            not isinstance(payload[channel], int) or isinstance(payload[channel], bool)
+            for channel in required
+        ):
+            raise HTTPException(status_code=400, detail="RGB values must be integers.")
+        if any(payload[channel] < 0 or payload[channel] > 255 for channel in required):
+            raise HTTPException(status_code=400, detail="RGB values must be between 0 and 255.")
         return _receipt_response(
             light_actions["solid"](payload["red"], payload["green"], payload["blue"])
         )

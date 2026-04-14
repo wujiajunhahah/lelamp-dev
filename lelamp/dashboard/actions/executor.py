@@ -17,6 +17,7 @@ class DashboardActionReceipt:
     state: str
     message: str
     error: str | None = None
+    active_action: str | None = None
 
 
 class DashboardActionExecutor:
@@ -42,6 +43,7 @@ class DashboardActionExecutor:
                     "busy",
                     "Another action is already running.",
                     error="busy",
+                    active_action=self._active_action,
                 )
 
             self._active_action = action_id
@@ -56,7 +58,13 @@ class DashboardActionExecutor:
             self._worker = worker
             worker.start()
 
-        return DashboardActionReceipt(True, action_id, "running", f"{action_id} started.")
+        return DashboardActionReceipt(
+            True,
+            action_id,
+            "running",
+            f"{action_id} started.",
+            active_action=action_id,
+        )
 
     def current_action(self) -> str | None:
         with self._lock:

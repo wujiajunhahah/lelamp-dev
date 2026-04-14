@@ -9,9 +9,9 @@ from lelamp.dashboard.state_store import DashboardStateStore
 
 
 class FakeExecutor:
-    def __init__(self, *, busy: bool = False) -> None:
+    def __init__(self, *, busy: bool = False, active: str | None = None) -> None:
         self.busy = busy
-        self.active = None
+        self.active = active
 
     def is_busy(self) -> bool:
         return self.busy
@@ -27,6 +27,7 @@ class FakeExecutor:
                 state="busy",
                 message="Another action is already running.",
                 error="busy",
+                active_action=self.active,
             )
         self.active = action_id
         return SimpleNamespace(
@@ -35,14 +36,18 @@ class FakeExecutor:
             state="running",
             message=f"{action_id} started.",
             error=None,
+            active_action=action_id,
         )
 
 
 class FakeBridge:
     settings = SimpleNamespace(home_recording="home_safe")
 
+    def __init__(self, recordings: list[str] | None = None) -> None:
+        self._recordings = ["curious", "wake_up"] if recordings is None else recordings
+
     def list_recordings(self) -> list[str]:
-        return ["curious", "wake_up"]
+        return list(self._recordings)
 
     def startup(self) -> DashboardActionResult:
         return DashboardActionResult(True, "startup complete")
@@ -115,7 +120,7 @@ class DashboardApiTests(unittest.TestCase):
             settings=settings,
             store=DashboardStateStore(),
             bridge=FakeBridge(),
-            executor=FakeExecutor(busy=True),
+            executor=FakeExecutor(busy=True, active="play:curious"),
             enable_background=False,
         )
         client = TestClient(app)
@@ -125,6 +130,80 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertFalse(response.json()["ok"])
         self.assertEqual(response.json()["error"], "busy")
+        self.assertEqual(response.json()["active_action"], "play:curious")
+
+    def test_get_actions_reports_button_states_and_disables_play_without_recordings(self) -> None:
+        settings = SimpleNamespace(
+            dashboard_host="0.0.0.0",
+            dashboard_port=8765,
+            dashboard_poll_ms=400,
+        )
+        app = create_app(
+            settings=settings,
+            store=DashboardStateStore(),
+            bridge=FakeBridge(recordings=[]),
+            executor=FakeExecutor(),
+            enable_background=False,
+        )
+        client = TestClient(app)
+
+        response = client.get("/api/actions")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["actions"]["startup"]["state"], "enabled")
+        self.assertEqual(payload["actions"]["startup"]["label"], "Startup")
+        self.assertFalse(payload["actions"]["play"]["enabled"])
+        self.assertEqual(payload["actions"]["play"]["state"], "disabled")
+        self.assertEqual(payload["actions"]["play"]["label"], "No Motion Loaded")
+
+    def test_get_actions_marks_running_action_and_disables_others(self) -> None:
+        settings = SimpleNamespace(
+            dashboard_host="0.0.0.0",
+            dashboard_port=8765,
+            dashboard_poll_ms=400,
+        )
+        app = create_app(
+            settings=settings,
+            store=DashboardStateStore(),
+            bridge=FakeBridge(),
+            executor=FakeExecutor(busy=True, active="startup"),
+            enable_background=False,
+        )
+        client = TestClient(app)
+
+        response = client.get("/api/actions")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["active_action"], "startup")
+        self.assertEqual(payload["actions"]["startup"]["state"], "running")
+        self.assertEqual(payload["actions"]["startup"]["label"], "Starting...")
+        self.assertEqual(payload["actions"]["play"]["state"], "disabled")
+        self.assertEqual(payload["actions"]["play"]["label"], "Busy")
+
+    def test_post_solid_light_rejects_rgb_values_out_of_range(self) -> None:
+        settings = SimpleNamespace(
+            dashboard_host="0.0.0.0",
+            dashboard_port=8765,
+            dashboard_poll_ms=400,
+        )
+        app = create_app(
+            settings=settings,
+            store=DashboardStateStore(),
+            bridge=FakeBridge(),
+            executor=FakeExecutor(),
+            enable_background=False,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/lights/solid",
+            json={"red": -1, "green": 999, "blue": 1},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "RGB values must be between 0 and 255.")
 
 
 if __name__ == "__main__":

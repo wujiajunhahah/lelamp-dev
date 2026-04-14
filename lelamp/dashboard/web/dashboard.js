@@ -1,4 +1,18 @@
 var DashboardApp = (function () {
+  var ACTION_META = {
+    startupButton: { actionKey: "startup", baseClass: "action-button action-button--primary", label: "Startup" },
+    playButton: { actionKey: "play", baseClass: "action-button", label: "Play Motion" },
+    stopButton: { actionKey: "stop", baseClass: "action-button", label: "Return Home" },
+    shutdownPoseButton: { actionKey: "shutdown_pose", baseClass: "action-button action-button--warn", label: "Shutdown Pose" },
+    lightAmberButton: { actionKey: "light_solid", baseClass: "action-button action-button--amber", label: "Warm Amber" },
+    lightClearButton: { actionKey: "light_clear", baseClass: "action-button", label: "Light Off" },
+  };
+  var runtimeMeta = {
+    pollMs: 400,
+    dashboardHost: "0.0.0.0",
+    dashboardPort: 8765,
+  };
+
   function byId(documentRef, id) {
     return documentRef.getElementById(id);
   }
@@ -100,65 +114,125 @@ var DashboardApp = (function () {
       .join("");
   }
 
-  function disableButtons(documentRef, isBusy) {
-    [
-      "startupButton",
-      "playButton",
-      "stopButton",
-      "shutdownPoseButton",
-      "lightAmberButton",
-      "lightClearButton"
-    ].forEach(function (id) {
-      var node = byId(documentRef, id);
-      if (node) {
-        node.disabled = Boolean(isBusy);
-      }
+  function buttonClass(baseClass, state) {
+    if (state === "running") {
+      return baseClass + " action-button--running";
+    }
+    if (state === "error") {
+      return baseClass + " action-button--error";
+    }
+    if (state === "disabled") {
+      return baseClass + " action-button--disabled";
+    }
+    return baseClass;
+  }
+
+  function defaultActionPayload(disableAll) {
+    var payload = {
+      busy: disableAll,
+      actions: {},
+      recordings: [],
+      poll_ms: runtimeMeta.pollMs,
+      config: {
+        dashboard_host: runtimeMeta.dashboardHost,
+        dashboard_port: runtimeMeta.dashboardPort,
+        poll_ms: runtimeMeta.pollMs,
+      },
+    };
+
+    Object.keys(ACTION_META).forEach(function (id) {
+      var meta = ACTION_META[id];
+      payload.actions[meta.actionKey] = {
+        enabled: !disableAll,
+        state: disableAll ? "disabled" : "enabled",
+        label: disableAll ? "Unavailable" : meta.label,
+      };
     });
+
+    return payload;
   }
 
   function applyActionAvailability(documentRef, payload) {
-    var busy = Boolean(payload && payload.busy);
-    var actions = payload && payload.actions ? payload.actions : {};
-    var mapping = {
-      startupButton: "startup",
-      playButton: "play",
-      stopButton: "stop",
-      shutdownPoseButton: "shutdown_pose",
-      lightAmberButton: "light_solid",
-      lightClearButton: "light_clear"
-    };
+    var actions = payload && payload.actions ? payload.actions : defaultActionPayload(true).actions;
 
-    Object.keys(mapping).forEach(function (id) {
+    Object.keys(ACTION_META).forEach(function (id) {
       var node = byId(documentRef, id);
-      var config = actions[mapping[id]];
+      var meta = ACTION_META[id];
+      var config = actions[meta.actionKey] || {
+        enabled: false,
+        state: "disabled",
+        label: "Unavailable",
+      };
       if (node) {
-        node.disabled = busy || (config && config.enabled === false);
+        node.disabled = config.enabled === false;
+        node.textContent = config.label || meta.label;
+        node.className = buttonClass(meta.baseClass, config.state || "enabled");
       }
     });
   }
 
   function populateRecordings(documentRef, recordings) {
     var select = byId(documentRef, "recordingSelect");
+    var currentValue;
     if (!select) {
       return;
     }
 
+    currentValue = select.value;
     select.innerHTML = "";
+    if (select.children && typeof select.children.length === "number") {
+      select.children.length = 0;
+    }
     if (!recordings || !recordings.length) {
+      select.disabled = true;
+      select.value = "";
       return;
     }
 
+    select.disabled = false;
     recordings.forEach(function (recording, index) {
       var option = documentRef.createElement("option");
       option.value = recording;
       option.textContent = recording;
-      if (index === 0) {
+      if (currentValue && currentValue === recording) {
+        select.value = recording;
+      } else if (!select.value && index === 0) {
         select.value = recording;
       }
       if (select.appendChild) {
         select.appendChild(option);
       }
     });
+  }
+
+  function renderHardwareNotes(documentRef, motion, light, audio) {
+    renderTokens(byId(documentRef, "hardwareNotes"), [
+      "motors=" + String(motion.motors_connected == null ? "unknown" : motion.motors_connected),
+      "calibration=" + String(motion.calibration_state || "unknown"),
+      "audio=" + String(audio.output_device || "unknown"),
+      "light=" + String(light.status || "unknown"),
+    ], "No hardware notes yet.");
+  }
+
+  function renderConnectivityHints(documentRef, reachableUrls) {
+    var hints = [];
+    if (reachableUrls && reachableUrls.length) {
+      hints.push("Pi screen: http://127.0.0.1:8765");
+      hints = hints.concat(reachableUrls.slice(0, 2).map(function (url) {
+        return "Nearby device: " + url;
+      }));
+    }
+    renderTokens(byId(documentRef, "connectivityHints"), hints, "No connectivity hints yet.");
+  }
+
+  function renderConfigSnippets(documentRef, motion) {
+    renderTokens(byId(documentRef, "configSnippets"), [
+      "LELAMP_DASHBOARD_HOST=" + runtimeMeta.dashboardHost,
+      "LELAMP_DASHBOARD_PORT=" + String(runtimeMeta.dashboardPort),
+      "LELAMP_DASHBOARD_POLL_MS=" + String(runtimeMeta.pollMs),
+      "LELAMP_HOME_RECORDING=" + String(motion.home_recording || "--"),
+      "LELAMP_STARTUP_RECORDING=" + String(motion.startup_recording || "--"),
+    ], "No config snippets yet.");
   }
 
   function renderState(documentRef, state) {
@@ -194,10 +268,13 @@ var DashboardApp = (function () {
     setClassName(byId(documentRef, "connectionStatus"), "status-pill status-pill--" + statusTone(connection));
     setClassName(byId(documentRef, "systemStatus"), "status-pill status-pill--" + statusTone(system.status || "unknown"));
 
+    populateRecordings(documentRef, motion.available_recordings || []);
     renderTokens(byId(documentRef, "reachableUrls"), reachable, "No reachable URLs reported yet.");
     renderTokens(byId(documentRef, "recordingList"), motion.available_recordings || [], "No recordings discovered.");
+    renderHardwareNotes(documentRef, motion, light, audio);
+    renderConnectivityHints(documentRef, reachable);
+    renderConfigSnippets(documentRef, motion);
     renderErrors(byId(documentRef, "errorFeed"), state.errors || []);
-    disableButtons(documentRef, system.status === "running");
   }
 
   function pollState(fetchRef, onState) {
@@ -228,17 +305,17 @@ var DashboardApp = (function () {
         return response.json();
       })
       .then(function (payload) {
+        runtimeMeta.pollMs = payload.poll_ms || runtimeMeta.pollMs;
+        if (payload.config) {
+          runtimeMeta.dashboardHost = payload.config.dashboard_host || runtimeMeta.dashboardHost;
+          runtimeMeta.dashboardPort = payload.config.dashboard_port || runtimeMeta.dashboardPort;
+        }
         applyActionAvailability(documentRef, payload);
         populateRecordings(documentRef, payload.recordings || []);
         return payload;
       })
       .catch(function () {
-        var fallback = {
-          busy: false,
-          recordings: [],
-          poll_ms: 400,
-          actions: {},
-        };
+        var fallback = defaultActionPayload(true);
         applyActionAvailability(documentRef, fallback);
         return fallback;
       });
