@@ -68,6 +68,17 @@ class DashboardSamplerTests(unittest.TestCase):
         self.assertEqual(discovered, ["http://127.0.0.1:8765", "http://10.0.0.2:8765"])
         self.assertEqual(explicit_empty, ["http://127.0.0.1:8765"])
 
+    def test_build_reachable_urls_discovers_local_ips_for_ipv6_wildcard(self) -> None:
+        with patch(
+            "lelamp.dashboard.samplers.network._local_ipv4_addresses",
+            return_value=["10.0.0.2"],
+        ):
+            discovered = build_reachable_urls("::", 8765)
+            explicit_empty = build_reachable_urls("::", 8765, ip_list=[])
+
+        self.assertEqual(discovered, ["http://[::1]:8765", "http://10.0.0.2:8765"])
+        self.assertEqual(explicit_empty, ["http://[::1]:8765"])
+
     def test_collect_audio_snapshot_returns_unknown_when_probe_fails(self) -> None:
         settings = _make_settings()
 
@@ -79,7 +90,38 @@ class DashboardSamplerTests(unittest.TestCase):
         self.assertEqual(snapshot["status"], "unknown")
         self.assertIsNone(snapshot["output_device"])
         self.assertIsNone(snapshot["volume_percent"])
-        self.assertIsNone(snapshot["last_result"])
+        self.assertEqual(snapshot["last_result"], "amixer unavailable")
+
+    def test_collect_audio_snapshot_returns_unknown_when_command_exits_non_zero(self) -> None:
+        settings = _make_settings()
+        result = SimpleNamespace(
+            returncode=1,
+            stdout="Mono: Playback 64 [64%] [-18.00dB] [on]",
+        )
+
+        snapshot = collect_audio_snapshot(
+            settings,
+            run_command=lambda *args, **kwargs: result,
+        )
+
+        self.assertEqual(snapshot["status"], "unknown")
+        self.assertIsNone(snapshot["output_device"])
+        self.assertIsNone(snapshot["volume_percent"])
+        self.assertEqual(snapshot["last_result"], "amixer exited with 1")
+
+    def test_collect_audio_snapshot_returns_unknown_when_volume_parse_fails(self) -> None:
+        settings = _make_settings()
+        result = SimpleNamespace(returncode=0, stdout="Mono: Playback [on]")
+
+        snapshot = collect_audio_snapshot(
+            settings,
+            run_command=lambda *args, **kwargs: result,
+        )
+
+        self.assertEqual(snapshot["status"], "unknown")
+        self.assertIsNone(snapshot["output_device"])
+        self.assertIsNone(snapshot["volume_percent"])
+        self.assertEqual(snapshot["last_result"], "volume parse failed")
 
     def test_collect_audio_snapshot_parses_ready_volume(self) -> None:
         settings = _make_settings()
@@ -105,6 +147,7 @@ class DashboardSamplerTests(unittest.TestCase):
             path_exists=lambda path: False,
         )
 
+        self.assertEqual(snapshot["status"], "error")
         self.assertFalse(snapshot["motors_connected"])
         self.assertEqual(snapshot["home_recording"], "home_safe")
         self.assertEqual(snapshot["startup_recording"], "wake_up")
@@ -217,9 +260,9 @@ class DashboardSamplerTests(unittest.TestCase):
             side_effect=[
                 {
                     "status": "unknown",
-                    "output_device": "Line",
+                    "output_device": None,
                     "volume_percent": None,
-                    "last_result": None,
+                    "last_result": "amixer unavailable",
                 }
             ],
         ):
@@ -247,6 +290,65 @@ class DashboardSamplerTests(unittest.TestCase):
         self.assertEqual(snapshot["system"]["status"], "ready")
         self.assertEqual(snapshot["motion"]["status"], "error")
         self.assertEqual(snapshot["audio"]["status"], "unknown")
+
+    def test_dashboard_sampler_loop_preserves_error_system_status_when_active_errors_exist(self) -> None:
+        settings = _make_settings(dashboard_poll_ms=50)
+        store = DashboardStateStore()
+        store.record_error("action.shutdown_pose", "motor unavailable", "motion", "error")
+
+        with patch(
+            "lelamp.dashboard.samplers.runtime.collect_runtime_snapshot",
+            return_value={
+                "status": "ready",
+                "active_action": None,
+                "uptime_s": 3,
+                "server_started_at": 1000,
+                "reachable_urls": ["http://127.0.0.1:8765"],
+            },
+        ), patch(
+            "lelamp.dashboard.samplers.runtime.collect_motor_snapshot",
+            return_value={
+                "status": "idle",
+                "current_recording": None,
+                "last_completed_recording": None,
+                "home_recording": "home_safe",
+                "startup_recording": "wake_up",
+                "last_result": None,
+                "motors_connected": "unknown",
+                "calibration_state": "unknown",
+                "available_recordings": ["home_safe"],
+            },
+        ), patch(
+            "lelamp.dashboard.samplers.runtime.collect_audio_snapshot",
+            return_value={
+                "status": "ready",
+                "output_device": "Line",
+                "volume_percent": 64,
+                "last_result": "sampled from amixer",
+            },
+        ):
+            loop = DashboardSamplerLoop(
+                store,
+                settings,
+                SimpleNamespace(),
+                SimpleNamespace(),
+                started_at=1.0,
+            )
+
+            loop.start()
+            try:
+                for _ in range(100):
+                    snapshot = store.snapshot()
+                    if snapshot["system"]["reachable_urls"]:
+                        break
+                    loop._thread.join(timeout=0.01)
+                else:
+                    self.fail("sampler loop did not patch system fields")
+            finally:
+                loop.stop()
+
+        self.assertEqual(snapshot["system"]["status"], "error")
+        self.assertIsNone(snapshot["system"]["active_action"])
 
     def test_dashboard_sampler_loop_recovers_after_sampler_exception(self) -> None:
         settings = _make_settings(dashboard_poll_ms=50)
@@ -358,12 +460,12 @@ class DashboardSamplerTests(unittest.TestCase):
 
             loop.start()
             try:
-                saw_ready = False
+                saw_running = False
                 for _ in range(100):
                     snapshot = store.snapshot()
-                    if not saw_ready and snapshot["system"]["status"] == "ready":
-                        saw_ready = True
-                    if saw_ready and snapshot["system"]["status"] == "unknown":
+                    if not saw_running and snapshot["system"]["status"] == "running":
+                        saw_running = True
+                    if saw_running and snapshot["system"]["status"] == "unknown":
                         break
                     loop._thread.join(timeout=0.01)
                 else:
@@ -530,6 +632,9 @@ class _FlakyPatchStore:
 
     def patch_with(self, section, updater):
         return self._store.patch_with(section, updater)
+
+    def reconcile_system(self, values):
+        return self._store.reconcile_system(values)
 
     def snapshot(self):
         return self._store.snapshot()

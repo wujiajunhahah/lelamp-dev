@@ -90,6 +90,14 @@ class DashboardStateStore:
             self._state["system"]["last_update_ms"] = _now_ms()
             return deepcopy(self._state)
 
+    def reconcile_system(self, values: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            system = self._state["system"]
+            system.update(deepcopy(values))
+            system["status"] = self._derive_system_status()
+            self._state["system"]["last_update_ms"] = _now_ms()
+            return deepcopy(self._state)
+
     def set_system(self, **values: Any) -> dict[str, Any]:
         return self.patch("system", values)
 
@@ -142,3 +150,27 @@ class DashboardStateStore:
                     break
 
             return deepcopy(self._state)
+
+    def _derive_system_status(self) -> str:
+        system = self._state["system"]
+        observed_status = system.get("status", "unknown")
+        if system.get("active_action") is not None:
+            return "running"
+        if observed_status == "unknown":
+            return "unknown"
+        if any(section.get("status") == "error" for section in self._iter_status_sections()):
+            return "error"
+        if any(section.get("status") == "warning" for section in self._iter_status_sections()):
+            return "warning"
+        if any(error["active"] and error["severity"] == "error" for error in self._state["errors"]):
+            return "error"
+        if any(error["active"] and error["severity"] == "warning" for error in self._state["errors"]):
+            return "warning"
+        return observed_status
+
+    def _iter_status_sections(self) -> tuple[dict[str, Any], ...]:
+        return (
+            self._state["motion"],
+            self._state["light"],
+            self._state["audio"],
+        )

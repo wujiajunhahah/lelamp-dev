@@ -89,7 +89,7 @@ class DashboardSamplerLoop:
                     "status": "unknown",
                     "output_device": None,
                     "volume_percent": None,
-                    "last_result": None,
+                    "last_result": "audio sampler failed",
                 },
             )
             self._stop_event.wait(self.interval_s)
@@ -101,6 +101,9 @@ class DashboardSamplerLoop:
             values = fallback
 
         try:
+            if section == "system":
+                self._store.reconcile_system(values)
+                return
             if section == "motion":
                 self._store.patch_with(
                     section,

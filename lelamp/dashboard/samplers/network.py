@@ -15,9 +15,9 @@ def build_reachable_urls(host: str, port: int, *, ip_list: list[str] | None = No
             urls.append(f"http://{_format_host(address)}:{port}")
     elif host == "::":
         urls.append(f"http://[::1]:{port}")
-        if ip_list is not None:
-            for address in ip_list:
-                urls.append(f"http://{_format_host(address)}:{port}")
+        addresses = _local_ipv4_addresses() if ip_list is None else ip_list
+        for address in addresses:
+            urls.append(f"http://{_format_host(address)}:{port}")
     else:
         urls.append(f"http://{_format_host(host)}:{port}")
 

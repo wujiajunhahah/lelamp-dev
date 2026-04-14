@@ -9,6 +9,15 @@ import subprocess
 _VOLUME_PATTERN = re.compile(r"\[(\d{1,3})%\]")
 
 
+def _unknown_audio_snapshot(last_result: str) -> dict[str, object]:
+    return {
+        "status": "unknown",
+        "output_device": None,
+        "volume_percent": None,
+        "last_result": last_result,
+    }
+
+
 def collect_audio_snapshot(settings, *, run_command=subprocess.run) -> dict[str, object]:
     try:
         result = run_command(
@@ -19,21 +28,14 @@ def collect_audio_snapshot(settings, *, run_command=subprocess.run) -> dict[str,
             check=False,
         )
     except Exception:
-        return {
-            "status": "unknown",
-            "output_device": None,
-            "volume_percent": None,
-            "last_result": None,
-        }
+        return _unknown_audio_snapshot("amixer unavailable")
 
-    match = _VOLUME_PATTERN.search(result.stdout)
+    if getattr(result, "returncode", 0) not in (0, None):
+        return _unknown_audio_snapshot(f"amixer exited with {result.returncode}")
+
+    match = _VOLUME_PATTERN.search(getattr(result, "stdout", "") or "")
     if match is None:
-        return {
-            "status": "unknown",
-            "output_device": None,
-            "volume_percent": None,
-            "last_result": None,
-        }
+        return _unknown_audio_snapshot("volume parse failed")
 
     volume = int(match.group(1))
     return {
