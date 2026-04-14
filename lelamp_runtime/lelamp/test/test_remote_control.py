@@ -11,6 +11,8 @@ class RemoteControlConfigTests(unittest.TestCase):
     def test_build_parser_loads_led_defaults_from_dotenv(self) -> None:
         fake_motors_module = types.ModuleType("lelamp.service.motors.motors_service")
         fake_motors_module.MotorsService = object
+        fake_animation_module = types.ModuleType("lelamp.service.motors.animation_service")
+        fake_animation_module.AnimationService = object
         fake_rgb_module = types.ModuleType("lelamp.service.rgb.rgb_service")
         fake_rgb_module.RGBService = object
 
@@ -21,6 +23,7 @@ class RemoteControlConfigTests(unittest.TestCase):
                 sys.modules,
                 {
                     "lelamp.service.motors.motors_service": fake_motors_module,
+                    "lelamp.service.motors.animation_service": fake_animation_module,
                     "lelamp.service.rgb.rgb_service": fake_rgb_module,
                 },
                 clear=False,
@@ -42,6 +45,8 @@ class RemoteControlConfigTests(unittest.TestCase):
     def test_build_parser_supports_capture_pose_command(self) -> None:
         fake_motors_module = types.ModuleType("lelamp.service.motors.motors_service")
         fake_motors_module.MotorsService = object
+        fake_animation_module = types.ModuleType("lelamp.service.motors.animation_service")
+        fake_animation_module.AnimationService = object
         fake_rgb_module = types.ModuleType("lelamp.service.rgb.rgb_service")
         fake_rgb_module.RGBService = object
         fake_follower_module = types.ModuleType("lelamp.follower")
@@ -52,6 +57,7 @@ class RemoteControlConfigTests(unittest.TestCase):
             sys.modules,
             {
                 "lelamp.service.motors.motors_service": fake_motors_module,
+                "lelamp.service.motors.animation_service": fake_animation_module,
                 "lelamp.service.rgb.rgb_service": fake_rgb_module,
                 "lelamp.follower": fake_follower_module,
             },
@@ -69,6 +75,8 @@ class RemoteControlConfigTests(unittest.TestCase):
     def test_build_parser_supports_startup_and_shutdown_commands(self) -> None:
         fake_motors_module = types.ModuleType("lelamp.service.motors.motors_service")
         fake_motors_module.MotorsService = object
+        fake_animation_module = types.ModuleType("lelamp.service.motors.animation_service")
+        fake_animation_module.AnimationService = object
         fake_rgb_module = types.ModuleType("lelamp.service.rgb.rgb_service")
         fake_rgb_module.RGBService = object
 
@@ -76,6 +84,7 @@ class RemoteControlConfigTests(unittest.TestCase):
             sys.modules,
             {
                 "lelamp.service.motors.motors_service": fake_motors_module,
+                "lelamp.service.motors.animation_service": fake_animation_module,
                 "lelamp.service.rgb.rgb_service": fake_rgb_module,
             },
             clear=False,

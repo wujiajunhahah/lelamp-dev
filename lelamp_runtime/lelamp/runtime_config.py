@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 
+from dotenv import load_dotenv
+
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
@@ -148,6 +150,7 @@ class RuntimeSettings:
 
 
 def load_runtime_settings() -> RuntimeSettings:
+    load_dotenv(dotenv_path=".env", override=False)
     model_provider = _get_model_provider()
 
     idle_recording = _get_str("LELAMP_IDLE_RECORDING", "idle")

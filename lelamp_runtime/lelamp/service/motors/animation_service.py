@@ -7,12 +7,23 @@ from lelamp.follower import LeLampFollowerConfig, LeLampFollower
 
 
 class AnimationService:
-    def __init__(self, port: str, lamp_id: str, fps: int = 30, duration: float = 5.0, idle_recording: str = "idle"):
+    def __init__(
+        self,
+        port: str,
+        lamp_id: str,
+        fps: int = 30,
+        duration: float = 5.0,
+        idle_recording: str = "idle",
+        home_recording: Optional[str] = None,
+        use_home_pose_relative: bool = False,
+    ):
         self.port = port
         self.lamp_id = lamp_id
         self.fps = fps
         self.duration = duration
         self.idle_recording = idle_recording
+        self.home_recording = home_recording or idle_recording
+        self.use_home_pose_relative = use_home_pose_relative
         self.robot_config = LeLampFollowerConfig(port=port, id=lamp_id)
         self.robot: LeLampFollower = None
         self.recordings_dir = os.path.join(os.path.dirname(__file__), "..", "..", "recordings")
@@ -63,6 +74,30 @@ class AnimationService:
         
         with self._event_lock:
             self._event_queue.append((event_type, payload))
+
+    def wait_until_playback_complete(self, timeout: Optional[float] = None) -> bool:
+        """Wait until all queued non-idle play requests have settled back to idle."""
+        deadline = None if timeout is None else time.monotonic() + timeout
+
+        while True:
+            with self._event_lock:
+                pending_non_idle = any(
+                    event_type == "play" and payload != self.idle_recording
+                    for event_type, payload in self._event_queue
+                )
+
+            active_non_idle = (
+                self._current_recording is not None
+                and self._current_recording != self.idle_recording
+            )
+
+            if not pending_non_idle and not active_non_idle:
+                return True
+
+            if deadline is not None and time.monotonic() >= deadline:
+                return False
+
+            time.sleep(0.02)
     
     def _event_loop(self):
         """Custom event loop that supports interruption"""

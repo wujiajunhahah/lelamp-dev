@@ -41,7 +41,7 @@ class FakeExecutor:
 
 
 class FakeBridge:
-    settings = SimpleNamespace(home_recording="home_safe")
+    settings = SimpleNamespace(home_recording="home_safe", startup_recording="wake_up")
 
     def __init__(self, recordings: list[str] | None = None) -> None:
         self._recordings = ["curious", "wake_up"] if recordings is None else recordings
@@ -69,12 +69,18 @@ class FakeBridge:
 
 
 class DashboardApiTests(unittest.TestCase):
-    def test_get_state_returns_snapshot(self) -> None:
-        settings = SimpleNamespace(
+    @staticmethod
+    def _make_settings() -> SimpleNamespace:
+        return SimpleNamespace(
             dashboard_host="0.0.0.0",
             dashboard_port=8765,
             dashboard_poll_ms=400,
+            home_recording="home_safe",
+            startup_recording="wake_up",
         )
+
+    def test_get_state_returns_snapshot(self) -> None:
+        settings = self._make_settings()
         app = create_app(
             settings=settings,
             store=DashboardStateStore(),
@@ -90,11 +96,7 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("system", response.json())
 
     def test_post_startup_returns_running_receipt(self) -> None:
-        settings = SimpleNamespace(
-            dashboard_host="0.0.0.0",
-            dashboard_port=8765,
-            dashboard_poll_ms=400,
-        )
+        settings = self._make_settings()
         app = create_app(
             settings=settings,
             store=DashboardStateStore(),
@@ -111,11 +113,7 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(response.json()["action_id"], "startup")
 
     def test_post_startup_returns_busy_when_executor_rejects(self) -> None:
-        settings = SimpleNamespace(
-            dashboard_host="0.0.0.0",
-            dashboard_port=8765,
-            dashboard_poll_ms=400,
-        )
+        settings = self._make_settings()
         app = create_app(
             settings=settings,
             store=DashboardStateStore(),
@@ -132,12 +130,8 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(response.json()["error"], "busy")
         self.assertEqual(response.json()["active_action"], "play:curious")
 
-    def test_get_actions_reports_button_states_and_disables_play_without_recordings(self) -> None:
-        settings = SimpleNamespace(
-            dashboard_host="0.0.0.0",
-            dashboard_port=8765,
-            dashboard_poll_ms=400,
-        )
+    def test_get_actions_disables_motion_buttons_when_required_recordings_are_missing(self) -> None:
+        settings = self._make_settings()
         app = create_app(
             settings=settings,
             store=DashboardStateStore(),
@@ -151,18 +145,19 @@ class DashboardApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["actions"]["startup"]["state"], "enabled")
-        self.assertEqual(payload["actions"]["startup"]["label"], "Startup")
+        self.assertFalse(payload["actions"]["startup"]["enabled"])
+        self.assertEqual(payload["actions"]["startup"]["state"], "disabled")
+        self.assertEqual(payload["actions"]["startup"]["label"], "Missing wake_up, home_safe")
         self.assertFalse(payload["actions"]["play"]["enabled"])
         self.assertEqual(payload["actions"]["play"]["state"], "disabled")
         self.assertEqual(payload["actions"]["play"]["label"], "No Motion Loaded")
+        self.assertFalse(payload["actions"]["stop"]["enabled"])
+        self.assertEqual(payload["actions"]["stop"]["label"], "Missing home_safe")
+        self.assertFalse(payload["actions"]["shutdown_pose"]["enabled"])
+        self.assertEqual(payload["actions"]["shutdown_pose"]["label"], "Missing power_off")
 
     def test_get_actions_marks_running_action_and_disables_others(self) -> None:
-        settings = SimpleNamespace(
-            dashboard_host="0.0.0.0",
-            dashboard_port=8765,
-            dashboard_poll_ms=400,
-        )
+        settings = self._make_settings()
         app = create_app(
             settings=settings,
             store=DashboardStateStore(),
@@ -183,11 +178,7 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(payload["actions"]["play"]["label"], "Busy")
 
     def test_post_solid_light_rejects_rgb_values_out_of_range(self) -> None:
-        settings = SimpleNamespace(
-            dashboard_host="0.0.0.0",
-            dashboard_port=8765,
-            dashboard_poll_ms=400,
-        )
+        settings = self._make_settings()
         app = create_app(
             settings=settings,
             store=DashboardStateStore(),

@@ -89,6 +89,32 @@ def _running_label(action_key: str, active_action: str | None) -> str:
     return running_label
 
 
+def _missing_recordings_for_action(
+    action_key: str,
+    snapshot: dict[str, object],
+    recordings: list[str],
+) -> list[str]:
+    motion = snapshot.get("motion", {})
+    available = set(recordings)
+    required: list[str] = []
+
+    if action_key == "startup":
+        required = [
+            motion.get("startup_recording"),
+            motion.get("home_recording"),
+        ]
+    elif action_key == "stop":
+        required = [motion.get("home_recording")]
+    elif action_key == "shutdown_pose":
+        required = ["power_off"]
+
+    missing: list[str] = []
+    for name in required:
+        if isinstance(name, str) and name and name not in available:
+            missing.append(name)
+    return missing
+
+
 def _action_catalog(
     snapshot: dict[str, object],
     recordings: list[str],
@@ -124,6 +150,15 @@ def _action_catalog(
                 "enabled": False,
                 "state": "disabled",
                 "label": meta["disabled_label"],
+            }
+            continue
+
+        missing_recordings = _missing_recordings_for_action(action_key, snapshot, recordings)
+        if missing_recordings:
+            catalog[action_key] = {
+                "enabled": False,
+                "state": "disabled",
+                "label": f"Missing {', '.join(missing_recordings)}",
             }
             continue
 
@@ -194,6 +229,11 @@ def create_app(
         busy = executor.is_busy()
         active_action = executor.current_action()
         snapshot = store.snapshot()
+        motion_snapshot = snapshot.setdefault("motion", {})
+        if not motion_snapshot.get("home_recording"):
+            motion_snapshot["home_recording"] = settings.home_recording
+        if not motion_snapshot.get("startup_recording"):
+            motion_snapshot["startup_recording"] = settings.startup_recording
         try:
             recordings = bridge.list_recordings()
         except Exception:
