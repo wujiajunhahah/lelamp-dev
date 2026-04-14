@@ -268,6 +268,37 @@ var DashboardApp = (function () {
     return meta.label;
   }
 
+  function sameItems(left, right) {
+    var index;
+    if (left.length !== right.length) {
+      return false;
+    }
+    for (index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function selectValues(select) {
+    var options = select && select.options ? select.options : select && select.children ? select.children : [];
+    return Array.prototype.map.call(options, function (option) {
+      return option.value;
+    });
+  }
+
+  function clearSelectOptions(select) {
+    if (select && select.options && typeof select.options.length === "number") {
+      select.options.length = 0;
+    } else if (select) {
+      select.innerHTML = "";
+      if (Array.isArray(select.children)) {
+        select.children.length = 0;
+      }
+    }
+  }
+
   function defaultActionPayload(disableAll) {
     var payload = {
       busy: disableAll,
@@ -314,36 +345,46 @@ var DashboardApp = (function () {
 
   function populateRecordings(documentRef, recordings) {
     var select = byId(documentRef, "recordingSelect");
+    var normalizedRecordings = recordings || [];
+    var existingValues;
     var currentValue;
+    var nextValue;
     if (!select) {
       return;
     }
 
+    existingValues = selectValues(select);
     currentValue = select.value;
-    select.innerHTML = "";
-    if (select.children && typeof select.children.length === "number") {
-      select.children.length = 0;
-    }
-    if (!recordings || !recordings.length) {
+    nextValue = currentValue;
+
+    if (!normalizedRecordings.length) {
+      clearSelectOptions(select);
       select.disabled = true;
       select.value = "";
       return;
     }
 
     select.disabled = false;
-    recordings.forEach(function (recording, index) {
+    if (sameItems(existingValues, normalizedRecordings)) {
+      if (!nextValue || normalizedRecordings.indexOf(nextValue) === -1) {
+        select.value = normalizedRecordings[0];
+      }
+      return;
+    }
+
+    clearSelectOptions(select);
+    normalizedRecordings.forEach(function (recording, index) {
       var option = documentRef.createElement("option");
       option.value = recording;
       option.textContent = recording;
-      if (currentValue && currentValue === recording) {
-        select.value = recording;
-      } else if (!select.value && index === 0) {
-        select.value = recording;
+      if (!nextValue && index === 0) {
+        nextValue = recording;
       }
       if (select.appendChild) {
         select.appendChild(option);
       }
     });
+    select.value = nextValue || "";
   }
 
   function heroCaption(motion) {
@@ -449,7 +490,7 @@ var DashboardApp = (function () {
   }
 
   function pollState(fetchRef, onState) {
-    return fetchRef("/api/state")
+    return fetchRef("/api/state", { cache: "no-store" })
       .then(function (response) {
         return response.json();
       })
@@ -471,7 +512,7 @@ var DashboardApp = (function () {
   }
 
   function loadActions(documentRef, fetchRef) {
-    return fetchRef("/api/actions")
+    return fetchRef("/api/actions", { cache: "no-store" })
       .then(function (response) {
         return response.json();
       })
@@ -494,6 +535,7 @@ var DashboardApp = (function () {
 
   function postJson(fetchRef, url, payload) {
     return fetchRef(url, {
+      cache: "no-store",
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload ? JSON.stringify(payload) : "{}",

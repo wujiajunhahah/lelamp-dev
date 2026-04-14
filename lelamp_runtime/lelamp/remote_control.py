@@ -2,6 +2,7 @@ import argparse
 import json
 import time
 from pathlib import Path
+from threading import Thread
 
 from dotenv import load_dotenv
 
@@ -105,6 +106,37 @@ def _play_frames(robot, frames: list[dict[str, float]], *, fps: int) -> None:
     for frame in frames:
         robot.send_action(frame)
         time.sleep(1.0 / fps)
+
+
+def _run_rgb_operation(
+    rgb_service,
+    operation_name: str,
+    *args,
+    context: str,
+    timeout_s: float = 0.3,
+) -> None:
+    if rgb_service is None:
+        return
+
+    outcome: dict[str, Exception | None] = {"error": None}
+
+    def _target() -> None:
+        try:
+            operation = getattr(rgb_service, operation_name)
+            operation(*args)
+        except Exception as exc:
+            outcome["error"] = exc
+
+    worker = Thread(target=_target, daemon=True)
+    worker.start()
+    worker.join(timeout=timeout_s)
+
+    if worker.is_alive():
+        print(f"RGB {operation_name} timed out during {context}; continuing without blocking motion")
+        return
+    if outcome["error"] is not None:
+        print(f"RGB {operation_name} failed during {context}: {outcome['error']}")
+        return
 
 
 def _handle_show_config(args) -> int:
@@ -252,8 +284,13 @@ def _handle_startup(args) -> int:
             final_hold_frames=args.final_hold_frames,
         )
 
-        if rgb_service is not None:
-            rgb_service.handle_event("solid", STARTUP_WARM_RGB)
+        _run_rgb_operation(
+            rgb_service,
+            "handle_event",
+            "solid",
+            STARTUP_WARM_RGB,
+            context="startup",
+        )
 
         settle_count = args.settle_frames + args.settle_hold_frames
         for index, frame in enumerate(startup_frames):
@@ -267,8 +304,7 @@ def _handle_startup(args) -> int:
     finally:
         if robot.is_connected:
             robot.disconnect()
-        if rgb_service is not None:
-            rgb_service.stop()
+        _run_rgb_operation(rgb_service, "stop", context="startup cleanup")
 
     print(f"Finished startup choreography: {startup_recording}")
     return 0
@@ -312,12 +348,11 @@ def _handle_shutdown(args) -> int:
             time.sleep(args.release_pause)
 
         if rgb_service is not None and not args.keep_led_on:
-            rgb_service.clear()
+            _run_rgb_operation(rgb_service, "clear", context="shutdown")
     finally:
         if robot.bus.is_connected:
             robot.bus.disconnect(disable_torque=False)
-        if rgb_service is not None:
-            rgb_service.stop()
+        _run_rgb_operation(rgb_service, "stop", context="shutdown cleanup")
 
     print(f"Finished shutdown choreography: {args.recording}")
     return 0

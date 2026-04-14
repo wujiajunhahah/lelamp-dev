@@ -329,6 +329,386 @@ Promise.resolve(context.DashboardApp.start(context.document, context.window, con
         self.assertFalse(payload["startupDisabled"])
         self.assertEqual(payload["motionStatus"], "醒着")
 
+    def test_dashboard_js_preserves_selected_recording_during_refresh(self) -> None:
+        source_path = ROOT / "dashboard.js"
+        script = f"""
+const fs = require("fs");
+const vm = require("vm");
+
+const source = fs.readFileSync({json.dumps(str(source_path))}, "utf8");
+const nodes = {{}};
+
+function createNode(id) {{
+  return {{
+    id,
+    textContent: "",
+    disabled: false,
+    value: "",
+    innerHTML: "",
+    children: [],
+    addEventListener: function () {{}},
+    appendChild: function (child) {{
+      this.children.push(child);
+    }},
+  }};
+}}
+
+const context = {{
+  console,
+  Promise,
+  JSON,
+  setTimeout,
+  clearTimeout,
+}};
+
+context.fetch = function (url) {{
+  if (url === "/api/actions") {{
+    return Promise.resolve({{
+      json: function () {{
+        return Promise.resolve({{
+          busy: false,
+          recordings: ["curious", "nod", "sad"],
+          poll_ms: 400,
+          actions: {{
+            startup: {{ enabled: true, state: "enabled", label: "启动灯" }},
+            play: {{ enabled: true, state: "enabled", label: "播放动作" }},
+            stop: {{ enabled: true, state: "enabled", label: "回到待机" }},
+            shutdown_pose: {{ enabled: true, state: "enabled", label: "进入休息" }},
+            light_solid: {{ enabled: true, state: "enabled", label: "暖黄灯光" }},
+            light_clear: {{ enabled: true, state: "enabled", label: "关闭灯光" }},
+          }},
+        }});
+      }},
+    }});
+  }}
+
+  return Promise.resolve({{
+    json: function () {{
+      return Promise.resolve({{
+        system: {{ status: "ready", active_action: null, last_update_ms: 0, reachable_urls: [] }},
+        motion: {{ status: "idle", available_recordings: ["curious", "nod", "sad"] }},
+        light: {{ status: "off" }},
+        audio: {{ status: "ready" }},
+        errors: [],
+      }});
+    }},
+  }});
+}};
+
+context.window = {{
+  intervalMs: null,
+  intervalFn: null,
+  setInterval: function (fn, ms) {{
+    this.intervalMs = ms;
+    this.intervalFn = fn;
+  }},
+  addEventListener: function () {{}},
+  fetch: null,
+}};
+
+context.document = {{
+  getElementById: function (id) {{
+    if (!nodes[id]) {{
+      nodes[id] = createNode(id);
+    }}
+    return nodes[id];
+  }},
+  createElement: function () {{
+    return createNode("option");
+  }},
+}};
+
+context.window.fetch = context.fetch;
+vm.createContext(context);
+vm.runInContext(source, context);
+
+Promise.resolve(context.DashboardApp.start(context.document, context.window, context.fetch, 400))
+  .then(function () {{
+    nodes.recordingSelect.value = "sad";
+    context.window.intervalFn();
+    return new Promise(function (resolve) {{ setTimeout(resolve, 0); }});
+  }})
+  .then(function () {{
+    console.log(JSON.stringify({{
+      value: nodes.recordingSelect.value,
+      recordings: nodes.recordingSelect.children.map(function (child) {{ return child.value; }}),
+    }}));
+  }})
+  .catch(function (error) {{
+    console.error(error && error.stack ? error.stack : String(error));
+    process.exit(1);
+  }});
+"""
+
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout.strip())
+        self.assertEqual(payload["recordings"], ["curious", "nod", "sad"])
+        self.assertEqual(payload["value"], "sad")
+
+    def test_dashboard_js_only_rebuilds_recordings_when_catalog_changes(self) -> None:
+        source_path = ROOT / "dashboard.js"
+        script = f"""
+const fs = require("fs");
+const vm = require("vm");
+
+const source = fs.readFileSync({json.dumps(str(source_path))}, "utf8");
+const nodes = {{}};
+let appendCount = 0;
+
+function createNode(id) {{
+  return {{
+    id,
+    textContent: "",
+    disabled: false,
+    value: "",
+    innerHTML: "",
+    children: [],
+    options: [],
+    addEventListener: function () {{}},
+    appendChild: function (child) {{
+      this.children.push(child);
+      this.options.push(child);
+      appendCount += 1;
+    }},
+  }};
+}}
+
+const context = {{
+  console,
+  Promise,
+  JSON,
+  setTimeout,
+  clearTimeout,
+}};
+
+context.fetch = function (url) {{
+  if (url === "/api/actions") {{
+    return Promise.resolve({{
+      json: function () {{
+        return Promise.resolve({{
+          busy: false,
+          recordings: ["curious", "nod", "sad"],
+          poll_ms: 400,
+          actions: {{
+            startup: {{ enabled: true, state: "enabled", label: "启动灯" }},
+            play: {{ enabled: true, state: "enabled", label: "播放动作" }},
+            stop: {{ enabled: true, state: "enabled", label: "回到待机" }},
+            shutdown_pose: {{ enabled: true, state: "enabled", label: "进入休息" }},
+            light_solid: {{ enabled: true, state: "enabled", label: "暖黄灯光" }},
+            light_clear: {{ enabled: true, state: "enabled", label: "关闭灯光" }},
+          }},
+        }});
+      }},
+    }});
+  }}
+
+  return Promise.resolve({{
+    json: function () {{
+      return Promise.resolve({{
+        system: {{ status: "ready", active_action: null, last_update_ms: 0, reachable_urls: [] }},
+        motion: {{ status: "idle", available_recordings: ["curious", "nod", "sad"] }},
+        light: {{ status: "off" }},
+        audio: {{ status: "ready" }},
+        errors: [],
+      }});
+    }},
+  }});
+}};
+
+context.window = {{
+  intervalMs: null,
+  intervalFn: null,
+  setInterval: function (fn, ms) {{
+    this.intervalMs = ms;
+    this.intervalFn = fn;
+  }},
+  addEventListener: function () {{}},
+  fetch: null,
+}};
+
+context.document = {{
+  getElementById: function (id) {{
+    if (!nodes[id]) {{
+      nodes[id] = createNode(id);
+    }}
+    return nodes[id];
+  }},
+  createElement: function () {{
+    return createNode("option");
+  }},
+}};
+
+context.window.fetch = context.fetch;
+vm.createContext(context);
+vm.runInContext(source, context);
+
+Promise.resolve(context.DashboardApp.start(context.document, context.window, context.fetch, 400))
+  .then(function () {{
+    return new Promise(function (resolve) {{ setTimeout(resolve, 0); }});
+  }})
+  .then(function () {{
+    context.window.intervalFn();
+    return new Promise(function (resolve) {{ setTimeout(resolve, 0); }});
+  }})
+  .then(function () {{
+    console.log(JSON.stringify({{
+      appendCount,
+      recordings: nodes.recordingSelect.children.map(function (child) {{ return child.value; }}),
+    }}));
+  }})
+  .catch(function (error) {{
+    console.error(error && error.stack ? error.stack : String(error));
+    process.exit(1);
+  }});
+"""
+
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout.strip())
+        self.assertEqual(payload["appendCount"], 3)
+        self.assertEqual(payload["recordings"], ["curious", "nod", "sad"])
+
+    def test_dashboard_js_fetches_state_without_browser_cache(self) -> None:
+        source_path = ROOT / "dashboard.js"
+        script = f"""
+const fs = require("fs");
+const vm = require("vm");
+
+const source = fs.readFileSync({json.dumps(str(source_path))}, "utf8");
+const calls = [];
+const nodes = {{}};
+
+function createNode(id) {{
+  return {{
+    id,
+    textContent: "",
+    disabled: false,
+    value: "",
+    innerHTML: "",
+    children: [],
+    addEventListener: function () {{}},
+    appendChild: function (child) {{
+      this.children.push(child);
+    }},
+  }};
+}}
+
+const context = {{
+  console,
+  Promise,
+  JSON,
+  setTimeout,
+  clearTimeout,
+}};
+
+context.fetch = function (url, options) {{
+  calls.push({{ url, cache: options && options.cache ? options.cache : null }});
+  if (url === "/api/actions") {{
+    return Promise.resolve({{
+      json: function () {{
+        return Promise.resolve({{
+          busy: false,
+          recordings: ["curious"],
+          poll_ms: 400,
+          actions: {{
+            startup: {{ enabled: true, state: "enabled", label: "启动灯" }},
+            play: {{ enabled: true, state: "enabled", label: "播放动作" }},
+            stop: {{ enabled: true, state: "enabled", label: "回到待机" }},
+            shutdown_pose: {{ enabled: true, state: "enabled", label: "进入休息" }},
+            light_solid: {{ enabled: true, state: "enabled", label: "暖黄灯光" }},
+            light_clear: {{ enabled: true, state: "enabled", label: "关闭灯光" }},
+          }},
+        }});
+      }},
+    }});
+  }}
+
+  return Promise.resolve({{
+    json: function () {{
+      return Promise.resolve({{
+        system: {{ status: "ready", active_action: null, last_update_ms: 0, reachable_urls: [] }},
+        motion: {{ status: "idle", available_recordings: ["curious"] }},
+        light: {{ status: "off" }},
+        audio: {{ status: "ready" }},
+        errors: [],
+      }});
+    }},
+  }});
+}};
+
+context.window = {{
+  intervalMs: null,
+  intervalFn: null,
+  setInterval: function (fn, ms) {{
+    this.intervalMs = ms;
+    this.intervalFn = fn;
+  }},
+  addEventListener: function () {{}},
+  fetch: null,
+}};
+
+context.document = {{
+  getElementById: function (id) {{
+    if (!nodes[id]) {{
+      nodes[id] = createNode(id);
+    }}
+    return nodes[id];
+  }},
+  createElement: function () {{
+    return createNode("option");
+  }},
+}};
+
+context.window.fetch = context.fetch;
+vm.createContext(context);
+vm.runInContext(source, context);
+
+Promise.resolve(context.DashboardApp.start(context.document, context.window, context.fetch, 400))
+  .then(function () {{
+    context.window.intervalFn();
+    return new Promise(function (resolve) {{ setTimeout(resolve, 0); }});
+  }})
+  .then(function () {{
+    console.log(JSON.stringify(calls));
+  }})
+  .catch(function (error) {{
+    console.error(error && error.stack ? error.stack : String(error));
+    process.exit(1);
+  }});
+"""
+
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout.strip())
+        self.assertEqual(
+            payload,
+            [
+                {"url": "/api/actions", "cache": "no-store"},
+                {"url": "/api/state", "cache": "no-store"},
+                {"url": "/api/actions", "cache": "no-store"},
+                {"url": "/api/state", "cache": "no-store"},
+            ],
+        )
+
     def test_dashboard_js_disables_controls_when_action_catalog_fails_and_resyncs_recordings_from_state(self) -> None:
         source_path = ROOT / "dashboard.js"
         script = f"""

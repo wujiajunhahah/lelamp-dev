@@ -177,6 +177,27 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(payload["actions"]["play"]["state"], "disabled")
         self.assertEqual(payload["actions"]["play"]["label"], "Busy")
 
+    def test_dashboard_api_responses_disable_browser_cache(self) -> None:
+        settings = self._make_settings()
+        app = create_app(
+            settings=settings,
+            store=DashboardStateStore(),
+            bridge=FakeBridge(),
+            executor=FakeExecutor(),
+            enable_background=False,
+        )
+        client = TestClient(app)
+
+        response = client.get("/api/actions")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["cache-control"],
+            "no-store, no-cache, must-revalidate, max-age=0",
+        )
+        self.assertEqual(response.headers["pragma"], "no-cache")
+        self.assertEqual(response.headers["expires"], "0")
+
     def test_post_solid_light_rejects_rgb_values_out_of_range(self) -> None:
         settings = self._make_settings()
         app = create_app(

@@ -334,6 +334,102 @@ class RemoteControlConfigTests(unittest.TestCase):
         self.assertTrue(FakeFollower.instances)
         self.assertTrue(FakeFollower.instances[0].actions)
 
+    def test_handle_startup_continues_when_rgb_runtime_calls_fail(self) -> None:
+        class FakeBus:
+            def __init__(self) -> None:
+                self.is_connected = True
+
+            def sync_read(self, *_args, **_kwargs):
+                return {
+                    "base_yaw": 1.0,
+                    "base_pitch": 2.0,
+                    "elbow_pitch": 3.0,
+                    "wrist_roll": 4.0,
+                    "wrist_pitch": 5.0,
+                }
+
+            def write(self, *_args, **_kwargs) -> None:
+                return None
+
+        class FakeFollower:
+            instances: list["FakeFollower"] = []
+
+            def __init__(self, _config) -> None:
+                self.bus = FakeBus()
+                self.is_connected = False
+                self.actions = []
+                FakeFollower.instances.append(self)
+
+            def connect(self, calibrate=False) -> None:
+                self.is_connected = True
+
+            def send_action(self, action) -> None:
+                self.actions.append(action)
+
+            def disconnect(self) -> None:
+                self.is_connected = False
+
+        class FakeFollowerConfig:
+            def __init__(self, **kwargs) -> None:
+                self.kwargs = kwargs
+
+        class FakeRGBService:
+            def handle_event(self, *_args, **_kwargs) -> None:
+                raise RuntimeError("rgb runtime boom")
+
+            def stop(self) -> None:
+                raise RuntimeError("rgb stop boom")
+
+        from lelamp import remote_control
+
+        args = SimpleNamespace(
+            port="/dev/ttyACM0",
+            id="lelamp",
+            recording="wake_up",
+            home_recording="home_safe",
+            settle_frames=1,
+            settle_hold_frames=1,
+            return_frames=1,
+            final_hold_frames=1,
+            settle_fps=15,
+            wake_fps=30,
+            post_wake_hold=0.0,
+            enable_rgb=True,
+            led_count=40,
+            led_pin=12,
+            led_freq_hz=800000,
+            led_dma=10,
+            led_brightness=255,
+            led_invert=False,
+            led_channel=0,
+        )
+
+        fake_follower_module = types.ModuleType("lelamp.follower")
+        fake_follower_module.LeLampFollower = FakeFollower
+        fake_follower_module.LeLampFollowerConfig = FakeFollowerConfig
+
+        with patch.dict(sys.modules, {"lelamp.follower": fake_follower_module}, clear=False), patch.object(
+            remote_control,
+            "_try_build_rgb_service",
+            return_value=FakeRGBService(),
+        ), patch.object(
+            remote_control,
+            "_load_first_pose",
+            return_value={"base_yaw.pos": 1.0, "base_pitch.pos": 2.0, "elbow_pitch.pos": 3.0, "wrist_roll.pos": 4.0, "wrist_pitch.pos": 5.0},
+        ), patch.object(
+            remote_control,
+            "_load_recording_actions",
+            return_value=[
+                {"base_yaw.pos": 1.0, "base_pitch.pos": 2.0, "elbow_pitch.pos": 3.0, "wrist_roll.pos": 4.0, "wrist_pitch.pos": 5.0},
+                {"base_yaw.pos": 2.0, "base_pitch.pos": 3.0, "elbow_pitch.pos": 4.0, "wrist_roll.pos": 5.0, "wrist_pitch.pos": 6.0},
+            ],
+        ), patch.object(remote_control.time, "sleep", return_value=None):
+            result = remote_control._handle_startup(args)
+
+        self.assertEqual(result, 0)
+        self.assertTrue(FakeFollower.instances)
+        self.assertTrue(FakeFollower.instances[0].actions)
+
 
 if __name__ == "__main__":
     unittest.main()

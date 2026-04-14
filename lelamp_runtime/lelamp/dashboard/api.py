@@ -213,6 +213,16 @@ def create_app(
     app = FastAPI(title="LeLamp Dashboard", lifespan=_lifespan)
     app.mount("/static", StaticFiles(directory=WEB_DIR, check_dir=False), name="static")
 
+    @app.middleware("http")
+    async def disable_local_cache(request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path == "/" or path.startswith("/api/") or path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
     @app.get("/")
     def index() -> FileResponse:
         index_path = WEB_DIR / "index.html"
