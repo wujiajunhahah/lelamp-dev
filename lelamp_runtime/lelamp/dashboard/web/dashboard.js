@@ -565,16 +565,14 @@ var DashboardApp = (function () {
     wireActions(documentRef, fetchRef);
     return loadActions(documentRef, fetchRef).then(function (payload) {
       var effectivePollMs = payload.poll_ms || pollMs;
-      return pollState(fetchRef, function (state) {
-        renderState(documentRef, state);
-      }).then(function () {
-        windowRef.setInterval(function () {
-          pollState(fetchRef, function (state) {
-            renderState(documentRef, state);
-          });
-        }, effectivePollMs);
-        return payload;
-      });
+        return pollState(fetchRef, function (state) {
+          renderState(documentRef, state);
+        }).then(function () {
+          windowRef.setInterval(function () {
+            refresh(documentRef, fetchRef);
+          }, effectivePollMs);
+          return payload;
+        });
     });
   }
 

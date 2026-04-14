@@ -25,7 +25,11 @@ class AnimationService:
         self.idle_recording = idle_recording
         self.home_recording = home_recording or idle_recording
         self.use_home_pose_relative = use_home_pose_relative
-        self.robot_config = LeLampFollowerConfig(port=port, id=lamp_id)
+        self.robot_config = LeLampFollowerConfig(
+            port=port,
+            id=lamp_id,
+            disable_torque_on_disconnect=False,
+        )
         self.robot: LeLampFollower = None
         self.recordings_dir = os.path.join(os.path.dirname(__file__), "..", "..", "recordings")
         

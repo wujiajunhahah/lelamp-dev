@@ -11,9 +11,10 @@ class AnimationServiceCompatibilityTests(unittest.TestCase):
         fake_follower_module = types.ModuleType("lelamp.follower")
 
         class FakeFollowerConfig:
-            def __init__(self, *, port: str, id: str) -> None:
+            def __init__(self, *, port: str, id: str, disable_torque_on_disconnect: bool = True) -> None:
                 self.port = port
                 self.id = id
+                self.disable_torque_on_disconnect = disable_torque_on_disconnect
 
         class FakeFollower:
             pass
@@ -38,15 +39,17 @@ class AnimationServiceCompatibilityTests(unittest.TestCase):
         self.assertEqual(service.idle_recording, "idle")
         self.assertEqual(service.home_recording, "home_safe")
         self.assertTrue(service.use_home_pose_relative)
+        self.assertFalse(service.robot_config.disable_torque_on_disconnect)
         self.assertTrue(service.wait_until_playback_complete(timeout=0.01))
 
     def test_load_recording_reanchors_non_home_recordings_relative_to_home_pose(self) -> None:
         fake_follower_module = types.ModuleType("lelamp.follower")
 
         class FakeFollowerConfig:
-            def __init__(self, *, port: str, id: str) -> None:
+            def __init__(self, *, port: str, id: str, disable_torque_on_disconnect: bool = True) -> None:
                 self.port = port
                 self.id = id
+                self.disable_torque_on_disconnect = disable_torque_on_disconnect
 
         class FakeFollower:
             pass
