@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#08111a">
+  <title>LeLamp 本地展台</title>
+  <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="topbar-copy">
+        <p class="eyebrow">LeLamp</p>
+        <h1>LeLamp 本地展台</h1>
+        <p class="subtitle">
+          面向演示现场的本地控制台。先看灯现在的状态，再决定是否启动、互动或进入休息。
+        </p>
+      </div>
+      <div class="topbar-meta">
+        <div class="status-group">
+          <span class="status-label">连接</span>
+          <div id="connectionStatus" class="status-pill status-pill--offline">离线</div>
+        </div>
+        <div class="status-group">
+          <span class="status-label">系统</span>
+          <div id="systemStatus" class="status-pill status-pill--unknown">未知</div>
+        </div>
+        <div class="status-group">
+          <span class="status-label">当前动作</span>
+          <div id="activeAction" class="status-pill">空闲</div>
+        </div>
+        <div class="status-group">
+          <span class="status-label">刷新</span>
+          <div id="lastUpdateTopbar" class="status-pill">0 毫秒</div>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel hero-panel">
+        <div class="panel-inner">
+          <div class="panel-head panel-head--hero">
+            <div>
+              <p class="eyebrow eyebrow--panel">当前状态</p>
+              <h2>灯现在在做什么</h2>
+            </div>
+            <p class="section-note">第一眼先看状态与气质，技术细节留在下方。</p>
+          </div>
+
+          <div class="hero-grid">
+            <div class="hero-copy">
+              <div class="hero-label">现在</div>
+              <div id="motionStatus" class="hero-state">未连接</div>
+              <p id="motionResult" class="hero-caption">正在等待运行时状态。</p>
+            </div>
+
+            <div class="hero-status-grid">
+              <div class="metric-card metric-card--accent">
+                <span>灯光</span>
+                <strong id="lightStatus">未知</strong>
+                <small id="lightColor">--</small>
+              </div>
+              <div class="metric-card">
+                <span>声音</span>
+                <strong id="audioStatus">未知</strong>
+                <small id="audioVolume">--</small>
+              </div>
+              <div class="metric-card">
+                <span>电机</span>
+                <strong id="motorConnectivity">未知</strong>
+                <small id="calibrationState">未知</small>
+              </div>
+              <div class="metric-card">
+                <span>现场</span>
+                <strong id="uptimeSeconds">0 秒</strong>
+                <small id="lastUpdate">0 毫秒</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel panel--actions">
+        <div class="panel-inner">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow eyebrow--panel">第二层</p>
+              <h2>动作控制</h2>
+            </div>
+            <p class="section-note">所有动作仍然串行执行，只是文案更适合现场演示。</p>
+          </div>
+
+          <div class="control-grid">
+            <button id="startupButton" class="action-button action-button--primary" type="button">启动灯</button>
+            <button id="stopButton" class="action-button" type="button">回到待机</button>
+            <div class="recording-picker">
+              <label for="recordingSelect">动作选择</label>
+              <select id="recordingSelect"></select>
+            </div>
+            <button id="playButton" class="action-button" type="button">播放动作</button>
+            <button id="shutdownPoseButton" class="action-button action-button--warn" type="button">进入休息</button>
+            <button id="lightAmberButton" class="action-button action-button--amber" type="button">暖黄灯光</button>
+            <button id="lightClearButton" class="action-button" type="button">关闭灯光</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel panel--memory">
+        <div class="panel-inner">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow eyebrow--panel">姿态记忆</p>
+              <h2>动作与回位基准</h2>
+            </div>
+            <p class="section-note">保留原始录制名，方便你后续维护与追加动作。</p>
+          </div>
+
+          <div class="snapshot-grid">
+            <div class="snapshot-card">
+              <span>待机基准</span>
+              <strong id="homeRecording">--</strong>
+            </div>
+            <div class="snapshot-card">
+              <span>启动基准</span>
+              <strong id="startupRecording">--</strong>
+            </div>
+            <div class="snapshot-card">
+              <span>当前动作</span>
+              <strong id="currentRecording">--</strong>
+            </div>
+            <div class="snapshot-card">
+              <span>上次完成</span>
+              <strong id="lastCompletedRecording">--</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="diagnosticsPanel" class="panel panel--details">
+        <div class="panel-inner">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow eyebrow--panel">第三层</p>
+              <h2>现场信息</h2>
+            </div>
+            <p class="section-note">给现场操作者和你自己看，不抢首屏，但信息完整保留。</p>
+          </div>
+
+          <div class="details-grid">
+            <section class="detail-block">
+              <h3>可访问地址</h3>
+              <div id="reachableUrls" class="token-list token-list--urls"></div>
+            </section>
+
+            <section class="detail-block">
+              <h3>动作库</h3>
+              <div id="recordingList" class="token-list"></div>
+            </section>
+
+            <section class="detail-block">
+              <h3>硬件提示</h3>
+              <div id="hardwareNotes" class="token-list"></div>
+            </section>
+
+            <section class="detail-block">
+              <h3>连接建议</h3>
+              <div id="connectivityHints" class="token-list"></div>
+            </section>
+
+            <section class="detail-block">
+              <h3>配置片段</h3>
+              <div id="configSnippets" class="token-list"></div>
+            </section>
+
+            <section class="detail-block detail-block--errors">
+              <h3>错误信息</h3>
+              <div id="errorFeed" class="error-feed"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>
