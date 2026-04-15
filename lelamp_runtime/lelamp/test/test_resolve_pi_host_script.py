@@ -7,24 +7,54 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "sync_pi_runtime.sh"
+SCRIPT = ROOT / "scripts" / "resolve_pi_host.sh"
 
 
-class SyncPiRuntimeScriptTests(unittest.TestCase):
-    def test_resolves_target_via_local_first_helper_before_syncing(self) -> None:
+class ResolvePiHostScriptTests(unittest.TestCase):
+    def test_explicit_host_bypasses_probe(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             temp_root = Path(tmpdir)
             fake_bin = temp_root / "bin"
             fake_bin.mkdir()
             ssh_log = temp_root / "ssh.log"
-            rsync_log = temp_root / "rsync.log"
+
+            self._write_executable(
+                fake_bin / "ssh",
+                f"""#!/bin/sh
+printf '%s\\n' "$*" >> "{ssh_log}"
+exit 1
+""",
+            )
+
+            env = os.environ.copy()
+            env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "pi-control.local"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+            self.assertEqual(result.stdout.strip(), "wujiajun@pi-control.local")
+            self.assertFalse(ssh_log.exists(), "explicit host should not trigger ssh probes")
+
+    def test_prefers_reachable_local_candidate_before_tailscale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_root = Path(tmpdir)
+            fake_bin = temp_root / "bin"
+            fake_bin.mkdir()
+            ssh_log = temp_root / "ssh.log"
 
             self._write_executable(
                 fake_bin / "ssh",
                 f"""#!/bin/sh
 printf '%s\\n' "$*" >> "{ssh_log}"
 case "$*" in
-  *"wujiajun@pi.test"*)
+  *"wujiajun@pi-local-good"*)
     exit 0
     ;;
   *)
@@ -33,23 +63,13 @@ case "$*" in
 esac
 """,
             )
-            self._write_executable(
-                fake_bin / "rsync",
-                f"""#!/bin/sh
-printf '%s\\n' "$*" >> "{rsync_log}"
-exit 0
-""",
-            )
 
             env = os.environ.copy()
             env.update(
                 {
                     "PATH": f"{fake_bin}:{env.get('PATH', '')}",
-                    "INSTALL_DASHBOARD_DEPS": "0",
-                    "VERIFY_DASHBOARD": "0",
-                    "START_DASHBOARD": "0",
-                    "SYNC_DELETE": "0",
-                    "LELAMP_PI_LOCAL_CANDIDATES": "pi.test",
+                    "LELAMP_PI_LOCAL_CANDIDATES": "pi-local-bad,pi-local-good",
+                    "LELAMP_PI_TAILSCALE_NAME": "lelamp-tailnet",
                 }
             )
 
@@ -63,40 +83,31 @@ exit 0
             )
 
             self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
-            self.assertIn("[sync] target=wujiajun@pi.test", result.stdout)
+            self.assertEqual(result.stdout.strip(), "wujiajun@pi-local-good")
             ssh_invocations = ssh_log.read_text(encoding="utf-8")
-            rsync_invocations = rsync_log.read_text(encoding="utf-8")
-            self.assertIn("wujiajun@pi.test", ssh_invocations)
-            self.assertIn("wujiajun@pi.test:", rsync_invocations)
+            self.assertIn("wujiajun@pi-local-bad", ssh_invocations)
+            self.assertIn("wujiajun@pi-local-good", ssh_invocations)
+            self.assertNotIn("lelamp-tailnet", ssh_invocations)
 
-    def test_start_dashboard_restart_command_avoids_self_matching_pkill_pattern(self) -> None:
+    def test_falls_back_to_tailscale_when_local_candidates_fail(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             temp_root = Path(tmpdir)
             fake_bin = temp_root / "bin"
             fake_bin.mkdir()
             ssh_log = temp_root / "ssh.log"
-            rsync_log = temp_root / "rsync.log"
 
             self._write_executable(
                 fake_bin / "ssh",
                 f"""#!/bin/sh
 printf '%s\\n' "$*" >> "{ssh_log}"
 case "$*" in
-  *"pkill -f 'lelamp.dashboard.api'"*)
-    echo "unsafe pkill pattern matched remote shell" >&2
-    exit 255
-    ;;
-  *)
+  *"wujiajun@lelamp-tailnet"*)
     exit 0
     ;;
+  *)
+    exit 1
+    ;;
 esac
-""",
-            )
-            self._write_executable(
-                fake_bin / "rsync",
-                f"""#!/bin/sh
-printf '%s\\n' "$*" >> "{rsync_log}"
-exit 0
 """,
             )
 
@@ -104,10 +115,8 @@ exit 0
             env.update(
                 {
                     "PATH": f"{fake_bin}:{env.get('PATH', '')}",
-                    "INSTALL_DASHBOARD_DEPS": "0",
-                    "VERIFY_DASHBOARD": "0",
-                    "START_DASHBOARD": "1",
-                    "SYNC_DELETE": "0",
+                    "LELAMP_PI_LOCAL_CANDIDATES": "pi-local-a,pi-local-b",
+                    "LELAMP_PI_TAILSCALE_NAME": "lelamp-tailnet",
                 }
             )
 
@@ -121,11 +130,11 @@ exit 0
             )
 
             self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+            self.assertEqual(result.stdout.strip(), "wujiajun@lelamp-tailnet")
             ssh_invocations = ssh_log.read_text(encoding="utf-8")
-            self.assertIn("mkdir -p", ssh_invocations)
-            self.assertIn("pkill -f '^./\\.venv/bin/python -m lelamp\\.dashboard\\.api$'", ssh_invocations)
-            self.assertIn("nohup ./.venv/bin/python -m lelamp.dashboard.api", ssh_invocations)
-            self.assertTrue(rsync_log.read_text(encoding="utf-8").strip())
+            self.assertIn("wujiajun@pi-local-a", ssh_invocations)
+            self.assertIn("wujiajun@pi-local-b", ssh_invocations)
+            self.assertIn("wujiajun@lelamp-tailnet", ssh_invocations)
 
     @staticmethod
     def _write_executable(path: Path, content: str) -> None:

@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TARGET_HOST="${1:-wujiajun@172.20.10.2}"
-REMOTE_BASE="${2:-/home/wujiajun/lelamp-dev}"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PI_USER="${LELAMP_PI_USER:-wujiajun}"
+TARGET_HOST_INPUT="${1:-}"
+REMOTE_BASE="${2:-/home/${PI_USER}/lelamp-dev}"
 REMOTE_RUNTIME="${REMOTE_BASE%/}/lelamp_runtime"
 
 INSTALL_DASHBOARD_DEPS="${INSTALL_DASHBOARD_DEPS:-1}"
 VERIFY_DASHBOARD="${VERIFY_DASHBOARD:-1}"
 START_DASHBOARD="${START_DASHBOARD:-0}"
 SYNC_DELETE="${SYNC_DELETE:-0}"
+
+if [[ -n "$TARGET_HOST_INPUT" ]]; then
+  TARGET_HOST="$(bash "${PROJECT_ROOT}/scripts/resolve_pi_host.sh" "$TARGET_HOST_INPUT")"
+else
+  TARGET_HOST="$(bash "${PROJECT_ROOT}/scripts/resolve_pi_host.sh")"
+fi
 
 if ! command -v rsync >/dev/null 2>&1; then
   echo "rsync is required locally." >&2

@@ -208,16 +208,93 @@ START_DASHBOARD=1 ./scripts/sync_pi_runtime.sh
 - 在树莓派上跑 dashboard smoke tests
 - 安全重启本地 dashboard 服务
 
-脚本默认目标是：
+现在这条脚本不再写死单个 IP，而是：
 
 ```bash
+先找本地局域网目标，再在需要时回退到 Tailscale
+```
+
+默认探测顺序是：
+
+```bash
+wujiajun@lelamp.local
+wujiajun@raspberrypi.local
 wujiajun@172.20.10.2
 ```
 
-如果你以后换机器或目录，也可以显式传：
+如果你想覆盖本地探测目标，或者加上你现场热点 / 校园网下常见的地址：
+
+```bash
+export LELAMP_PI_LOCAL_CANDIDATES="wujiajun@lelamp.local,wujiajun@raspberrypi.local,wujiajun@192.168.31.42"
+```
+
+如果你已经给树莓派配了 Tailscale，也可以给同步脚本一个远程兜底：
+
+```bash
+export LELAMP_PI_TAILSCALE_NAME="lelamp-pi5"
+```
+
+或者直接写 Tailnet IP / 完整 SSH 目标：
+
+```bash
+export LELAMP_PI_TAILSCALE_HOST="wujiajun@100.x.y.z"
+```
+
+显式指定目标仍然可用：
 
 ```bash
 ./scripts/sync_pi_runtime.sh your-user@your-pi-ip /home/your-user/lelamp-dev
+```
+
+如果你只想强制指定一个目标，不让脚本探测：
+
+```bash
+export LELAMP_PI_HOST="wujiajun@100.x.y.z"
+./scripts/sync_pi_runtime.sh
+```
+
+可用环境变量：
+
+```bash
+LELAMP_PI_USER
+LELAMP_PI_HOST
+LELAMP_PI_LOCAL_CANDIDATES
+LELAMP_PI_TAILSCALE_NAME
+LELAMP_PI_TAILSCALE_HOST
+LELAMP_PI_SSH_TIMEOUT
+```
+
+## Tailscale 无头兜底
+
+如果你不想每次都和树莓派在同一个局域网，推荐把 `Tailscale` 配成无头常驻。
+
+首次在开发机上执行：
+
+```bash
+export LELAMP_PI_LOCAL_CANDIDATES="wujiajun@lelamp.local,wujiajun@raspberrypi.local"
+export TAILSCALE_AUTH_KEY="tskey-xxxx"
+export TAILSCALE_HOSTNAME="lelamp-pi5"
+./scripts/setup_tailscale_remote.sh
+```
+
+这条脚本会在树莓派上：
+
+- 安装 `tailscale`
+- `enable + start tailscaled`
+- 如果你提供了 `TAILSCALE_AUTH_KEY`，直接完成首次 `tailscale up --ssh`
+
+配置好以后，树莓派只要重新连上网络，`tailscaled` 就会自动上线，不需要你再接键盘和显示器。
+
+如果你不想在首次配置时传 auth key，也可以先只安装：
+
+```bash
+./scripts/setup_tailscale_remote.sh
+```
+
+然后未来有机会登录树莓派时手动补一次：
+
+```bash
+sudo tailscale up --ssh --hostname lelamp-pi5
 ```
 
 ## 重启后自动收尾

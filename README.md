@@ -218,6 +218,23 @@ START_DASHBOARD=1 ./scripts/sync_pi_runtime.sh
 - 自动跑 dashboard smoke tests
 - 安全重启本地 dashboard
 
+现在同步脚本已经改成：
+
+- 本地局域网优先探测
+- 需要时回退到 Tailscale
+- 不再要求你手工记一个固定 IP
+
+如果你想让树莓派以后一联网就自动回到你的私网里，首次再跑一次：
+
+```bash
+cd lelamp_runtime
+export TAILSCALE_AUTH_KEY=tskey-xxxx
+export TAILSCALE_HOSTNAME=lelamp-pi5
+./scripts/setup_tailscale_remote.sh
+```
+
+完成后，Pi 上的 `tailscaled` 会开机自启；只要网络恢复，它就会自动重新上线。
+
 树莓派上的本地面板默认是：
 
 - 本机：`http://127.0.0.1:8765`
