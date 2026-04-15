@@ -5,6 +5,10 @@ build/
 dist/
 wheels/
 *.egg-info
+.DS_Store
+POST_BOOT_REPORT.md
+.pi5_post_boot.env
+.worktrees/
 
 # Virtual environments
 .venv
