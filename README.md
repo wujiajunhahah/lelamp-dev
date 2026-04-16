@@ -75,17 +75,20 @@ RESPEAKER_VARIANT=auto|v2|v1|skip
 最关键的是这几个：
 
 ```bash
-MODEL_PROVIDER=glm
+MODEL_PROVIDER=qwen
 MODEL_API_KEY=
-MODEL_BASE_URL=https://open.bigmodel.cn/api/paas/v4
-MODEL_NAME=glm-realtime
-MODEL_VOICE=tongtong
+MODEL_BASE_URL=https://dashscope.aliyuncs.com/api-ws/v1/realtime
+MODEL_NAME=qwen3.5-omni-flash-realtime
+MODEL_VOICE=Tina
+LELAMP_AGENT_LANGUAGE=zh-CN
+LELAMP_AGENT_OPENING_LINE=灯灯醒了。
 LIVEKIT_URL=
 LIVEKIT_API_KEY=
 LIVEKIT_API_SECRET=
 LELAMP_ID=lelamp
 LELAMP_PORT=/dev/ttyACM0
 LELAMP_AUDIO_USER=pi
+HF_LEROBOT_CALIBRATION=/home/pi/.cache/huggingface/lerobot/calibration
 LELAMP_LED_COUNT=40
 LELAMP_ENABLE_RGB=true
 ```
@@ -93,13 +96,32 @@ LELAMP_ENABLE_RGB=true
 说明：
 
 - `MODEL_*` 是当前仓库的标准配置
-- `MODEL_PROVIDER=glm` 是默认路径
-- `ZAI_API_KEY` 和 `OPENAI_API_KEY` 仍然保留兼容回退，但不再是主配置键
+- `MODEL_PROVIDER=qwen` 是当前默认路径，直接走 DashScope 的官方 realtime websocket
+- `DASHSCOPE_API_KEY` / `QWEN_API_KEY`、`ZAI_API_KEY` 和 `OPENAI_API_KEY` 都保留兼容回退，但不再是主配置键
+- `LELAMP_AGENT_LANGUAGE` 和 `LELAMP_AGENT_OPENING_LINE` 控制默认对话语言和开机第一句
+- `HF_LEROBOT_CALIBRATION` 建议显式指向你当前用户的 calibration 目录，这样即使 runtime 用 `root` 跑灯光服务，也不会丢掉 follower 校准
 - `LELAMP_ENABLE_RGB=false` 可以临时关闭 LED 路径，隔离音频、动作和语音问题
+- `qwen` 默认走服务端 `server_vad`，也就是直接说话就会断句，不需要再额外做唤醒词
+
+如果你想接树莓派本地模型，目前前提是：
+
+```bash
+MODEL_PROVIDER=custom
+MODEL_BASE_URL=http://127.0.0.1:8000/v1/realtime
+MODEL_NAME=your-local-model
+```
+
+注意：
+
+- 当前这套代码仍然走 `livekit + openai.realtime.RealtimeModel`
+- 所以本地模型必须暴露一个 OpenAI 兼容的 realtime 接口
+- 如果你的本地模型只有普通 `/v1/chat/completions`，那不能直接替换进来，得另做一套 STT + LLM + TTS 管线
 
 ## Pi 5 LED 路径
 
 Pi 5 上默认走官方 `ws2812-pio` 驱动，不走 `rpi_ws281x` DMA 路径。
+
+ReSpeaker V2 的默认 `/etc/asound.conf` 现在会写成 `dmix/dsnoop + plug` 结构，目的是让 root 启动的 realtime 语音链也能稳定打开 `24kHz mono` 输入输出，而不是只看 codec 的理论上限。
 
 `scripts/pi_setup_max.sh` 会把下面这行持久化到 `/boot/firmware/config.txt`：
 
@@ -232,6 +254,12 @@ sudo uv run -m lelamp.remote_control clear
 uv run smooth_animation.py download-files
 uv run smooth_animation.py console
 ```
+
+说明：
+
+- `console` 是当前这套 Pi + ReSpeaker 的默认路径，直接走树莓派本机麦克风和扬声器
+- 如果你要开机常驻，本仓库的 `systemd` 示例同样跑 `uv run smooth_animation.py console`
+- `start` / `connect` 仍然保留给 LiveKit 房间模式，但那是可选扩展，不是本地演示的默认路径
 
 ### OpenClaw
 

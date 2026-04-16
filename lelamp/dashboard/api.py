@@ -26,35 +26,35 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 
 _ACTION_META = {
     "startup": {
-        "label": "Startup",
-        "running_label": "Starting...",
+        "label": "启动灯",
+        "running_label": "启动中",
         "section": "motion",
     },
     "play": {
-        "label": "Play Motion",
-        "running_label": "Playing {name}...",
-        "disabled_label": "No Motion Loaded",
+        "label": "播放动作",
+        "running_label": "动作中",
+        "disabled_label": "暂无动作",
         "section": "motion",
         "requires_recordings": True,
     },
     "stop": {
-        "label": "Return Home",
-        "running_label": "Returning Home...",
+        "label": "回到待机",
+        "running_label": "回位中",
         "section": "motion",
     },
     "shutdown_pose": {
-        "label": "Shutdown Pose",
-        "running_label": "Entering Shutdown Pose...",
+        "label": "进入休息",
+        "running_label": "休息中",
         "section": "motion",
     },
     "light_solid": {
-        "label": "Warm Amber",
-        "running_label": "Setting Warm Amber...",
+        "label": "暖黄灯光",
+        "running_label": "点亮中",
         "section": "light",
     },
     "light_clear": {
-        "label": "Light Off",
-        "running_label": "Clearing Light...",
+        "label": "关闭灯光",
+        "running_label": "关闭中",
         "section": "light",
     },
 }
@@ -115,7 +115,7 @@ def _action_catalog(
                 catalog[action_key] = {
                     "enabled": False,
                     "state": "disabled",
-                    "label": "Busy",
+                    "label": "执行中",
                 }
             continue
 
@@ -131,7 +131,7 @@ def _action_catalog(
             catalog[action_key] = {
                 "enabled": True,
                 "state": "error",
-                "label": "Motion Error" if meta["section"] == "motion" else "Light Error",
+                "label": "动作异常" if meta["section"] == "motion" else "灯光异常",
             }
             continue
 

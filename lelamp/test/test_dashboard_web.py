@@ -20,6 +20,8 @@ class DashboardWebTests(unittest.TestCase):
         self.assertIn('id="hardwareNotes"', html)
         self.assertIn('id="connectivityHints"', html)
         self.assertIn('id="configSnippets"', html)
+        self.assertIn('id="voiceStatus"', html)
+        self.assertIn('id="voiceDiagnostics"', html)
 
     def test_dashboard_css_contains_responsive_layout_rules(self) -> None:
         css = (ROOT / "dashboard.css").read_text(encoding="utf-8")
@@ -68,23 +70,23 @@ const context = {{
 context.fetch = function (url) {{
   pollCalls.push(url);
   if (url === "/api/actions") {{
-    return Promise.resolve({{
-      json: function () {{
-        return Promise.resolve({{
-          busy: false,
-          recordings: ["curious"],
-          poll_ms: 400,
-          actions: {{
-            startup: {{ enabled: true, state: "enabled", label: "Startup" }},
-            play: {{ enabled: true, state: "enabled", label: "Play Motion" }},
-            stop: {{ enabled: true, state: "enabled", label: "Return Home" }},
-            shutdown_pose: {{ enabled: true, state: "enabled", label: "Shutdown Pose" }},
-            light_solid: {{ enabled: true, state: "enabled", label: "Warm Amber" }},
-            light_clear: {{ enabled: true, state: "enabled", label: "Light Off" }},
-          }},
-        }});
-      }},
-    }});
+            return Promise.resolve({{
+              json: function () {{
+                return Promise.resolve({{
+                  busy: false,
+                  recordings: ["curious"],
+                  poll_ms: 400,
+                  actions: {{
+                    startup: {{ enabled: true, state: "enabled", label: "启动灯" }},
+                    play: {{ enabled: true, state: "enabled", label: "播放动作" }},
+                    stop: {{ enabled: true, state: "enabled", label: "回到待机" }},
+                    shutdown_pose: {{ enabled: true, state: "enabled", label: "进入休息" }},
+                    light_solid: {{ enabled: true, state: "enabled", label: "暖黄灯光" }},
+                    light_clear: {{ enabled: true, state: "enabled", label: "关闭灯光" }},
+                  }},
+                }});
+              }},
+            }});
   }}
 
   return Promise.resolve({{
@@ -150,7 +152,7 @@ Promise.resolve(context.DashboardApp.start(context.document, context.window, con
         payload = json.loads(result.stdout.strip())
         self.assertEqual(payload["intervalMs"], 400)
         self.assertEqual(payload["pollCalls"], ["/api/actions", "/api/state"])
-        self.assertEqual(payload["startupLabel"], "Startup")
+        self.assertEqual(payload["startupLabel"], "启动灯")
 
     def test_dashboard_js_disables_controls_when_action_catalog_fails_and_resyncs_recordings_from_state(self) -> None:
         source_path = ROOT / "dashboard.js"
@@ -263,6 +265,13 @@ Promise.resolve(context.DashboardApp.start(context.document, context.window, con
         self.assertTrue(payload["startupDisabled"])
         self.assertTrue(payload["playDisabled"])
         self.assertEqual(payload["recordings"], ["curious"])
+
+    def test_dashboard_js_avoids_browser_microphone_console_strings(self) -> None:
+        js = (ROOT / "dashboard.js").read_text(encoding="utf-8")
+
+        self.assertNotIn("setMicrophoneEnabled", js)
+        self.assertNotIn("需 HTTPS", js)
+        self.assertNotIn("/api/livekit/session", js)
 
 
 if __name__ == "__main__":

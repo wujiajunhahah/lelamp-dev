@@ -45,6 +45,20 @@ _DEFAULT_STATE_TEMPLATE = {
         "volume_percent": None,
         "last_result": None,
     },
+    "voice": {
+        "status": "unknown",
+        "local_state": "unknown",
+        "speech_threshold_db": None,
+        "noise_floor_db": None,
+        "last_level_db": None,
+        "calibration_enabled": False,
+        "calibration_progress": 0.0,
+        "last_asr_status": "unknown",
+        "last_asr_error_code": None,
+        "last_asr_text": None,
+        "last_reply_text": None,
+        "last_result": "voice telemetry unavailable",
+    },
     "errors": [],
 }
 
@@ -173,4 +187,5 @@ class DashboardStateStore:
             self._state["motion"],
             self._state["light"],
             self._state["audio"],
+            self._state["voice"],
         )

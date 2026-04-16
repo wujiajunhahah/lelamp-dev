@@ -10,6 +10,7 @@ from .motion_profiles import (
     build_dynamic_startup_actions,
     build_staged_shutdown_actions,
 )
+from .pose_presets import write_pose_recordings
 from .pose_snapshot import upsert_env_value, write_static_recording
 from .runtime_config import load_runtime_settings
 from .service.motors.animation_service import AnimationService
@@ -31,6 +32,17 @@ DEFAULT_SHUTDOWN_HOLD_FRAMES = 8
 DEFAULT_SHUTDOWN_FPS = 12
 DEFAULT_SHUTDOWN_FINAL_HOLD_SECONDS = 1.0
 DEFAULT_RELEASE_PAUSE_SECONDS = 0.8
+
+
+def _recordings_dir() -> Path:
+    return Path(__file__).resolve().parent / "recordings"
+
+
+def _write_home_defaults(env_path: Path) -> None:
+    upsert_env_value(env_path, "LELAMP_IDLE_RECORDING", "home_safe")
+    upsert_env_value(env_path, "LELAMP_HOME_RECORDING", "home_safe")
+    upsert_env_value(env_path, "LELAMP_STARTUP_RECORDING", "wake_up")
+    upsert_env_value(env_path, "LELAMP_USE_HOME_POSE_RELATIVE", "true")
 
 
 def _build_rgb_service(args) -> RGBService:
@@ -59,7 +71,7 @@ def _build_animation_service(args) -> AnimationService:
 
 
 def _load_recording_actions(name: str) -> list[dict[str, float]]:
-    recording_path = Path(__file__).resolve().parent / "recordings" / f"{name}.csv"
+    recording_path = _recordings_dir() / f"{name}.csv"
     if not recording_path.exists():
         raise FileNotFoundError(f"Recording not found: {recording_path}")
 
@@ -186,7 +198,7 @@ def _handle_capture_pose(args) -> int:
         if robot.bus.is_connected:
             robot.bus.disconnect(disable_torque=False)
 
-    recording_path = Path(__file__).resolve().parent / "recordings" / f"{args.name}.csv"
+    recording_path = _recordings_dir() / f"{args.name}.csv"
     write_static_recording(
         recording_path,
         pose,
@@ -202,6 +214,24 @@ def _handle_capture_pose(args) -> int:
         upsert_env_value(env_path, "LELAMP_STARTUP_RECORDING", args.name)
         upsert_env_value(env_path, "LELAMP_HOME_RECORDING", args.name)
         upsert_env_value(env_path, "LELAMP_USE_HOME_POSE_RELATIVE", "true")
+        print(f"Updated defaults in {env_path}")
+
+    return 0
+
+
+def _handle_sync_pose_recordings(args) -> int:
+    recording_paths = write_pose_recordings(
+        _recordings_dir(),
+        fps=args.fps,
+        frame_count=args.frame_count,
+    )
+
+    for path in recording_paths:
+        print(f"Wrote pose recording: {path}")
+
+    if args.set_defaults:
+        env_path = Path(args.env_file)
+        _write_home_defaults(env_path)
         print(f"Updated defaults in {env_path}")
 
     return 0
@@ -360,6 +390,15 @@ def build_parser() -> argparse.ArgumentParser:
     capture_pose.add_argument("--env-file", default=".env", help="Env file to update when --set-defaults is used")
     capture_pose.add_argument("--set-defaults", action="store_true", help="Also set idle/startup recording defaults")
     capture_pose.set_defaults(handler=_handle_capture_pose)
+
+    sync_pose_recordings = subparsers.add_parser(
+        "sync-pose-recordings",
+        help="Regenerate the static home/sleep/shutdown pose recordings from the checked-in presets",
+    )
+    sync_pose_recordings.add_argument("--frame-count", type=int, default=30, help="Number of identical frames to write")
+    sync_pose_recordings.add_argument("--env-file", default=".env", help="Env file to update when --set-defaults is used")
+    sync_pose_recordings.add_argument("--set-defaults", action="store_true", help="Also set the home-safe runtime defaults")
+    sync_pose_recordings.set_defaults(handler=_handle_sync_pose_recordings)
 
     startup = subparsers.add_parser("startup", help="Run the formal startup choreography")
     startup.add_argument("--recording", default="wake_up", help="Recording name to use as the wake-up body motion")

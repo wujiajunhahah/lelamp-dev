@@ -8,6 +8,7 @@ from lelamp.dashboard.samplers import (
     collect_audio_snapshot,
     collect_motor_snapshot,
     collect_runtime_snapshot,
+    collect_voice_snapshot,
 )
 from lelamp.dashboard.state_store import DashboardStateStore
 
@@ -18,6 +19,7 @@ def _make_settings(**overrides):
         "dashboard_port": 8765,
         "dashboard_poll_ms": 400,
         "audio_user": "pi",
+        "voice_state_path": "/tmp/lelamp-voice-state.json",
         "port": "/dev/ttyACM0",
         "home_recording": "home_safe",
         "startup_recording": "wake_up",
@@ -136,6 +138,42 @@ class DashboardSamplerTests(unittest.TestCase):
         self.assertEqual(snapshot["output_device"], "Line")
         self.assertEqual(snapshot["volume_percent"], 64)
         self.assertEqual(snapshot["last_result"], "sampled from amixer")
+
+    def test_collect_voice_snapshot_returns_unknown_when_telemetry_is_missing(self) -> None:
+        settings = _make_settings(voice_state_path="/tmp/does-not-exist.json")
+
+        snapshot = collect_voice_snapshot(settings)
+
+        self.assertEqual(snapshot["status"], "unknown")
+        self.assertEqual(snapshot["local_state"], "unknown")
+        self.assertEqual(snapshot["last_result"], "voice telemetry unavailable")
+
+    def test_collect_voice_snapshot_reads_voice_telemetry_file(self) -> None:
+        settings = _make_settings(voice_state_path="/tmp/test-voice-state.json")
+
+        with patch(
+            "lelamp.dashboard.samplers.voice.read_voice_telemetry",
+            return_value={
+                "status": "ready",
+                "local_state": "idle",
+                "speech_threshold_db": -47.0,
+                "noise_floor_db": -55.0,
+                "last_level_db": -58.0,
+                "last_asr_status": "ok",
+                "last_asr_error_code": None,
+                "last_asr_text": "你好",
+                "last_reply_text": "我在",
+                "last_result": "识别成功",
+            },
+        ):
+            snapshot = collect_voice_snapshot(settings)
+
+        self.assertEqual(snapshot["status"], "ready")
+        self.assertEqual(snapshot["local_state"], "idle")
+        self.assertEqual(snapshot["speech_threshold_db"], -47.0)
+        self.assertEqual(snapshot["noise_floor_db"], -55.0)
+        self.assertEqual(snapshot["last_asr_text"], "你好")
+        self.assertEqual(snapshot["last_reply_text"], "我在")
 
     def test_collect_motor_snapshot_marks_missing_port_and_keeps_recording_metadata(self) -> None:
         settings = _make_settings(port="/dev/missing")
@@ -265,6 +303,22 @@ class DashboardSamplerTests(unittest.TestCase):
                     "last_result": "amixer unavailable",
                 }
             ],
+        ), patch(
+            "lelamp.dashboard.samplers.runtime.collect_voice_snapshot",
+            side_effect=[
+                {
+                    "status": "ready",
+                    "local_state": "idle",
+                    "speech_threshold_db": -47.0,
+                    "noise_floor_db": -55.0,
+                    "last_level_db": -60.0,
+                    "last_asr_status": "ok",
+                    "last_asr_error_code": None,
+                    "last_asr_text": "你好",
+                    "last_reply_text": "我在",
+                    "last_result": "voice telemetry sampled",
+                }
+            ],
         ):
             loop = DashboardSamplerLoop(
                 store,
@@ -290,6 +344,7 @@ class DashboardSamplerTests(unittest.TestCase):
         self.assertEqual(snapshot["system"]["status"], "ready")
         self.assertEqual(snapshot["motion"]["status"], "error")
         self.assertEqual(snapshot["audio"]["status"], "unknown")
+        self.assertEqual(snapshot["voice"]["status"], "ready")
 
     def test_dashboard_sampler_loop_preserves_error_system_status_when_active_errors_exist(self) -> None:
         settings = _make_settings(dashboard_poll_ms=50)

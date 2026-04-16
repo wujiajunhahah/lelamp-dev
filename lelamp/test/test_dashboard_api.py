@@ -88,6 +88,7 @@ class DashboardApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("system", response.json())
+        self.assertIn("voice", response.json())
 
     def test_post_startup_returns_running_receipt(self) -> None:
         settings = SimpleNamespace(
@@ -152,10 +153,10 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["actions"]["startup"]["state"], "enabled")
-        self.assertEqual(payload["actions"]["startup"]["label"], "Startup")
+        self.assertEqual(payload["actions"]["startup"]["label"], "启动灯")
         self.assertFalse(payload["actions"]["play"]["enabled"])
         self.assertEqual(payload["actions"]["play"]["state"], "disabled")
-        self.assertEqual(payload["actions"]["play"]["label"], "No Motion Loaded")
+        self.assertEqual(payload["actions"]["play"]["label"], "暂无动作")
 
     def test_get_actions_marks_running_action_and_disables_others(self) -> None:
         settings = SimpleNamespace(
@@ -178,9 +179,9 @@ class DashboardApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["active_action"], "startup")
         self.assertEqual(payload["actions"]["startup"]["state"], "running")
-        self.assertEqual(payload["actions"]["startup"]["label"], "Starting...")
+        self.assertEqual(payload["actions"]["startup"]["label"], "启动中")
         self.assertEqual(payload["actions"]["play"]["state"], "disabled")
-        self.assertEqual(payload["actions"]["play"]["label"], "Busy")
+        self.assertEqual(payload["actions"]["play"]["label"], "执行中")
 
     def test_post_solid_light_rejects_rgb_values_out_of_range(self) -> None:
         settings = SimpleNamespace(

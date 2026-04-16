@@ -15,6 +15,7 @@ class DashboardStateStoreTests(unittest.TestCase):
         self.assertEqual(snapshot["motion"]["status"], "unknown")
         self.assertEqual(snapshot["light"]["status"], "unknown")
         self.assertEqual(snapshot["audio"]["status"], "unknown")
+        self.assertEqual(snapshot["voice"]["status"], "unknown")
         self.assertEqual(snapshot["errors"], [])
 
     def test_snapshot_returns_deep_copy(self) -> None:
@@ -136,6 +137,14 @@ class DashboardStateStoreTests(unittest.TestCase):
 
         self.assertFalse(snapshot["errors"][0]["active"])
         self.assertEqual(snapshot["errors"][0]["last_seen_ms"], 250)
+
+    def test_voice_warning_contributes_to_derived_system_status(self) -> None:
+        store = DashboardStateStore()
+
+        store.patch("voice", {"status": "warning", "local_state": "committing"})
+        snapshot = store.reconcile_system({"status": "ready"})
+
+        self.assertEqual(snapshot["system"]["status"], "warning")
 
     def test_mutating_exported_default_state_does_not_affect_new_store(self) -> None:
         original_default = deepcopy(state_store.DEFAULT_STATE)

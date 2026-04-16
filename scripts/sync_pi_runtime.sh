@@ -9,7 +9,7 @@ REMOTE_RUNTIME="${REMOTE_BASE%/}/lelamp_runtime"
 INSTALL_DASHBOARD_DEPS="${INSTALL_DASHBOARD_DEPS:-1}"
 VERIFY_DASHBOARD="${VERIFY_DASHBOARD:-1}"
 START_DASHBOARD="${START_DASHBOARD:-0}"
-SYNC_DELETE="${SYNC_DELETE:-0}"
+SYNC_DELETE="${SYNC_DELETE:-1}"
 
 if ! command -v rsync >/dev/null 2>&1; then
   echo "rsync is required locally." >&2

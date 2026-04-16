@@ -8,6 +8,7 @@ from time import time
 from .audio import collect_audio_snapshot
 from .motors import collect_motor_snapshot
 from .network import build_reachable_urls
+from .voice import collect_voice_snapshot
 
 
 def collect_runtime_snapshot(settings, executor, started_at: float) -> dict[str, object]:
@@ -90,6 +91,24 @@ class DashboardSamplerLoop:
                     "output_device": None,
                     "volume_percent": None,
                     "last_result": "audio sampler failed",
+                },
+            )
+            self._patch_section(
+                "voice",
+                lambda: collect_voice_snapshot(self._settings),
+                fallback={
+                    "status": "unknown",
+                    "local_state": "unknown",
+                    "speech_threshold_db": None,
+                    "noise_floor_db": None,
+                    "last_level_db": None,
+                    "calibration_enabled": False,
+                    "calibration_progress": 0.0,
+                    "last_asr_status": "unknown",
+                    "last_asr_error_code": None,
+                    "last_asr_text": None,
+                    "last_reply_text": None,
+                    "last_result": "voice sampler failed",
                 },
             )
             self._stop_event.wait(self.interval_s)
