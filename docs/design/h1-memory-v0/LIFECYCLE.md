@@ -82,21 +82,29 @@ v0 的 session 概念是"**一次进程的活跃寿命**"；但 dashboard 和 `r
 
 ### 场景 C：dashboard 和 CLI 同时并发，都没有 agent
 
-极少见。两个独立进程都尝试新建 manual session。由 **flock 串行化**决定：先拿锁的那个写 meta.json，后拿锁的读到 meta 存活（秒级 ts 差距 < 1s）→ 依附到它。**同一秒启动是病态场景**，与 agent session 的同名冲突规则一致（见 `OPEN_QUESTIONS.md` OQ-2）。
+极少见。两个独立进程都尝试新建 manual session。**v0 明确：不做 manual-to-manual attach**——两个并发 standalone writer **各自建独立** `sess_manual_<ts>`：
+
+- 秒级时间戳天然错开（`sess_manual_YYYY-MM-DD_HH-MM-SS`）
+- flock 只保证"写 meta.json 的 tmp+rename 不交错"，不作为 session 依附依据
+- 极端同秒冲突：按 OQ-2 定的规则给第二个 manual 加 `-1 / -2` 后缀
+
+**为什么不做 manual-to-manual attach**：manual session 的 owner 进程通常是短命的（`remote_control play curious` 跑几秒就退出），引入"manual 也要判活"等于要给每个 manual meta 加 pid 字段 + liveness 心跳，复杂度远超带来的价值。两条独立 `sess_manual_` 并不会污染 prompt 读路径（见 §"Recent Window" 的过滤规则），且事件仍然全部保留在 `events.jsonl`。
 
 ### 归属判活的小工具函数（规格）
 
-writer 模块必须提供一个纯函数：
+writer 模块必须提供一个纯函数，仅对 **agent session** 做依附判定：
 
 ```
 attach_or_create_session() -> (session_id, is_manual)
   1. 扫 sessions/*.meta.json，按 start_ts_ms 降序
-  2. 逐条：pid 非空且存活？→ 返回 (session_id, False)
-  3. 扫完没找到 → 分配 sess_manual_<ts>，写 meta，返回 (session_id, True)
-  操作全程在 flock 保护下
+  2. 逐条只看 agent session（flags.source != "standalone_writer" 且 pid 非空）：
+       pid 存活？→ 返回 (session_id, False)   # 场景 A
+  3. 扫完没找到存活 agent → 分配新的 sess_manual_<ts>，写 meta（pid=null），
+     返回 (session_id, True)                   # 场景 B / C
+  操作全程在 flock 保护下；步骤 2 **不**把 manual session 当作依附目标
 ```
 
-所有 dashboard / remote_control 的事件写入**必须**走这个函数拿到的 `session_id`，不得自造。
+所有 dashboard / remote_control 的事件写入**必须**走这个函数拿到的 `session_id`，不得自造。**不存在** "manual 依附到 manual" 路径。
 
 ---
 
@@ -208,8 +216,10 @@ prompt 注入要"带最近一点上下文"。v0 的窗口定义：
 }
 ```
 
-- `sessions`：列出最近 3 个 **agent** session 的 summary 指针（过滤掉 `sess_manual_` 前缀）
-- `event_tail_refs`：最近 200 个事件的**索引**（仅 `event_id` + `kind` + `ts_ms`）；reader 按需回读全文
+- `sessions`：列出最近 3 个 **agent** session 的 summary 指针（**过滤掉 `sess_manual_` 前缀**）
+- `event_tail_refs`：最近 200 个事件的**索引**（仅 `event_id` + `kind` + `ts_ms`）；**同样过滤掉属于 `sess_manual_*` 的事件**（`event_tail_refs` 构建时按事件所在 session 的 id 判断）；reader 按需回读全文
+
+> **为什么 manual session 的事件也要过滤掉**：prompt_builder 只消费 `recent_index.json` 和 `sessions/*.summary.json`；如果 `event_tail_refs` 或 summary sessions 里混入 manual session，`recent_conversation` / `playback_digest` 等 section 就会把硬件调试行为当成"用户上下文"塞进 prompt，和"debug 不污染用户语境"的目标冲突。manual session 的事件仍然保留在 `events.jsonl` 和归档里，只是**不进 prompt 读路径**。
 
 选择 `session_count_cap = 3` 和 `event_cap = 200` 的理由：
 
