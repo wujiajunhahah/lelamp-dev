@@ -179,7 +179,7 @@ Session 结束时写入（`atexit` 触发），**原子**：
   - 可选生成，由一个独立的 summarization 步骤（本地 Gemma-3-4B-GGUF 或者 qwen 短 prompt）产出
   - 生成失败 / 超时 → 依然写 summary，`narrative = null`，不阻塞 session 正常退出
 - **narrative 预算上限：512 tokens / 1024 字符**；超出截断
-- **manual session 不生成 `narrative`**（没有对话脉络可总结），只写统计字段
+- **manual session 不生成 `narrative`**（没有对话脉络可总结），可写统计字段；这些统计只用于审计 / 归档，不代表它们会进入 prompt 读路径
 
 ### 为什么 summary 不是事件
 

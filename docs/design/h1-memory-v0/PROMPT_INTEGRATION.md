@@ -179,8 +179,8 @@ HARDWARE USAGE (recent 10)
 
 **所有三级都 `sess_manual_*` 零参与 prompt 读路径**：
 - `recent_conversation` section 不得包含 manual session 的 conversation 事件
-- `playback_digest` section 不得包含 `initiator=remote_control` 且 `session_id` 以 `sess_manual_` 开头的 playback
-- `style_tendency` 聚合 `style_histogram` 时**仅基于** agent summary；manual session 没有 histogram（它们也不生成 narrative）
+- `playback_digest` section 不得包含任何 `session_id` 以 `sess_manual_` 开头的 playback（无论 initiator 是 `dashboard` 还是 `remote_control`）
+- `style_tendency` 聚合 `style_histogram` 时**仅基于** agent summary；manual session 即使带统计字段，也一律不参与 prompt 聚合
 
 这三级都**不写盘**。writer 进程下次启动时会在自检阶段把 index 补齐，reader 下一次启动就能回到 normal。
 
