@@ -101,7 +101,7 @@ H1 memory **不碰** MotorBusArbiter。
 - 写入端：memory writer 是 **纯旁路**，不经过 8770 motor_bus，不参与硬件仲裁
 - 读取端：voice agent 启动时从文件读取，不走任何 HTTP
 - 失败降级：memory 目录缺失 / JSONL 损坏 → **静默忽略**，lelamp 行为退化成现在的无记忆版本（即当前 runtime-main 行为）
-- **反向独立**：session 开始不依赖 MotorBusServer 成功启动；arbiter bind retry 最终失败、`AnimationService.start()` 抛错时，memory 层照样记录（`meta.json.flags.motor_bus_enabled = false`）。见 `LIFECYCLE.md` §"Session 的定义"
+- **反向独立**：session 开始不依赖 MotorBusServer 成功启动；arbiter bind retry 最终失败、`AnimationService.start()` 抛错时，memory 层照样记录事件。`meta.json.flags.motor_bus_enabled` 由 writer 做**两阶段** tmp+rename 写入：阶段 1（session 启动瞬间）写 `null`，阶段 2（`MotorBusServer.start()` 返回后）根据 arbiter 裁定结果写 `true` / `false`。阶段 1 ↔ 阶段 2 之间崩溃会让 `flags.motor_bus_enabled` 停留在 `null`，reader 必须容忍 `null` / `true` / `false` 三种取值。见 `LIFECYCLE.md` §"Session 的定义" 和 §"`*.meta.json`"
 
 换句话说，**H1 不能把 H0 变不稳，H0 也不能把 H1 变不记**。这是底线。
 

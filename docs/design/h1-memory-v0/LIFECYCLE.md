@@ -4,14 +4,15 @@
 
 一个 session = **一次 lelamp agent 进程的活跃寿命**，而不是"一次对话"。
 
-- session 开始：`smooth_animation.py` 的 `entrypoint` **进入后的第一步**，在任何硬件 / arbiter 初始化**之前**；此时 writer 立刻做 "index 自检"（见下文）并写 `sessions/*.meta.json`
+- session 开始：`smooth_animation.py` 的 `entrypoint` **进入后的第一步**，在任何硬件 / arbiter 初始化**之前**；此时 writer 立刻做 "index 自检"（见下文）并写 `sessions/*.meta.json` **骨架**（`flags.motor_bus_enabled = null`，表示"尚未确定"）
+- arbiter 裁定：`MotorBusServer.start()` 返回后（无论成功 / 失败 / 放弃），同一个 writer **第二次** tmp+rename 更新同一份 `meta.json`，把 `flags.motor_bus_enabled` 设为 `true` / `false`
 - session 结束：进程收到 `SIGTERM` / `SIGINT` / 正常退出时的 `atexit` 钩子
 - session 之间的间隔（lelamp 没在跑）**不算** agent session
 
 > **重要（与 H0 的解耦）**：session 开始 **不** 依赖 MotorBusServer 是否成功 `start()`。
 > 即使 arbiter bind retry 失败、串口被占、`AnimationService.start()` 抛错，session 仍然正常开始；
-> 这些硬件状态只影响 `meta.json` 里 `flags.motor_bus_enabled` 等字段，不影响 memory 层是否记录。
-> 这保证了 "记忆层与硬件仲裁层独立" 的合同（见 `README.md` §"与 H0 的关系"）。
+> 这些硬件状态只**延后**由同一 writer 做第二次 `meta.json` tmp+rename 写入 `flags.motor_bus_enabled`，不影响 memory 层是否记录事件。
+> 这保证了 "记忆层与硬件仲裁层独立" 的合同（见 `README.md` §"与 H0 的关系"）；具体两阶段写入语义见 §"`*.meta.json`"。
 
 ### 为什么是"一次进程"而不是"一次对话"
 
@@ -118,7 +119,11 @@ events.jsonl                                        # 整个 session 的事件 i
 
 ### `*.meta.json`
 
-Session 启动那一刻写入，**原子**（tmp+rename）：
+v0 的 agent session 下 `meta.json` 允许被 writer **两阶段**写入；每一阶段都是独立的 **原子** tmp+rename。manual session 只有一次写入（第一阶段终态）。
+
+#### 阶段 1（session 启动瞬间，flock 下）
+
+内容 = **不依赖硬件**的字段 + `flags.motor_bus_enabled: null`：
 
 ```json
 {
@@ -132,14 +137,59 @@ Session 启动那一刻写入，**原子**（tmp+rename）：
   "git_ref": "cf5a692",
   "model_providers": ["qwen"],
   "flags": {
-    "motor_bus_enabled": true,
+    "motor_bus_enabled": null,
     "fluxchi_enabled": false
   }
 }
 ```
 
+`null` 是**显式**语义："arbiter 还没裁定" —— reader 要能和 `true` / `false` 一视同仁处理（见下面的 reader 容忍契约）。
+
+#### 阶段 2（`MotorBusServer.start()` 返回后，同 writer，flock 下）
+
+writer 做一次 read → in-memory patch → tmp+rename：
+
+```
+1. flock(global .lock, LOCK_EX)
+2. read sessions/<session_id>.meta.json  (阶段 1 落盘结果)
+3. patch["flags"]["motor_bus_enabled"] = True  # 或 False
+4. atomic tmp+rename 覆盖
+5. release flock
+```
+
+**写入触发**：
+
+| arbiter 返回情况 | `flags.motor_bus_enabled` 阶段 2 的值 |
+|---|---|
+| `MotorBusServer.start()` 正常返回且 `is_ready()` = True | `true` |
+| bind retry 最终失败 / `server not started` | `false` |
+| `AnimationService.start()` 抛错 → 整个 arbiter 启动被跳过 | `false` |
+| 进程在阶段 1 之后、阶段 2 之前被 SIGKILL | 阶段 2 永远不执行，`flags.motor_bus_enabled` 停留在 `null`（下次 writer 启动自检时**不回填**，因为这是历史事实） |
+
+#### 单 writer 保证
+
+meta.json 的所有写入 **仅由拥有 session 的那个 writer 发出**：
+- agent session → `smooth_animation.py` 进程
+- manual session → 创建它的 dashboard / remote_control 进程
+没有任何"另一个进程补写别人家 meta.json"的路径（writer 启动自检只**补 summary**，不**改 meta**；见 §"容错与恢复"）。因此阶段 1 ↔ 阶段 2 之间不存在跨进程 read-modify-write 竞争，flock 仅防"同一个 writer 的两次 tmp+rename 和其它 writer 的 append 交错"。
+
+#### Reader 容忍契约
+
+任何消费 `meta.json` 的 reader 必须同时接受三种 `flags.motor_bus_enabled` 取值：
+
+- `true` — arbiter ready；硬件动作事件（function_tool / playback）可期望 ok=true
+- `false` — arbiter 明确不可用；事件层可能出现 `function_tool.result.ok=false` 为常态，不视为异常
+- `null` — arbiter 裁定前崩溃；按"未记录"处理，**不**触发任何重建 / 回填
+
+#### Manual session 的差异
+
+dashboard / remote_control 独立运行时产生的 `sess_manual_*` **不走 arbiter**，因此阶段 1 写完就是终态。约束：
+
+- `pid = null` + `flags.source = "standalone_writer"`
+- `flags.motor_bus_enabled` **恒为 null**；这反映"manual session 不对 arbiter 的健康做判定"，而不是"arbiter 挂了"
+- 阶段 2 对 manual session **不存在**
+
 `timezone`：写 IANA 名字，供日后跨时区 replay 用。
-manual session 的 meta 结构相同，只是 `pid=null` + `flags.source="standalone_writer"`（见上文"场景 B"）。
 
 ### `*.summary.json`
 
@@ -173,13 +223,49 @@ Session 结束时写入（`atexit` 触发），**原子**：
 字段说明：
 
 - `event_counts`、`style_histogram`、`fallback_rate`、`top_recordings` 都是**纯统计**，由 writer 在进程退出前扫本 session 的 events 计算
-- `fallback_rate` = `fallback_expression` 事件数 / `conversation` 事件数；= 0.33 意味着每 3 轮对话就有 1 次被 AutoExpressionController 兜底
+- `fallback_rate` = `fallback_expression` 事件数 / `conversation` 事件数；= 0.33 意味着每 3 轮对话就有 1 次被 AutoExpressionController 兜底；**当 `event_counts.conversation == 0` 时（任何 playback-only manual session 都如此）取 `null`**，避免除零和"0/0 = 0 fallback" 的误导
+- `style_histogram` 的 key 来自 `conversation.assistant_style`；**没有 conversation 时为空字典 `{}`**，不是省略也不是 `null`
+- `top_recordings` 仅从 `kind=playback` 和 `kind=function_tool{tool_name=play_recording}` 的事件统计；manual session 通常只有 playback，`top_recordings` 可以是长度 0–3 的数组
 - `narrative` 是**可选**的自然语言摘要；v0 的生产策略：
   - **默认不生成**，值为 `null`
   - 可选生成，由一个独立的 summarization 步骤（本地 Gemma-3-4B-GGUF 或者 qwen 短 prompt）产出
   - 生成失败 / 超时 → 依然写 summary，`narrative = null`，不阻塞 session 正常退出
 - **narrative 预算上限：512 tokens / 1024 字符**；超出截断
-- **manual session 不生成 `narrative`**（没有对话脉络可总结），可写统计字段；这些统计只用于审计 / 归档，不代表它们会进入 prompt 读路径
+- **manual session 不生成 `narrative`**（没有对话脉络可总结），可写统计字段；这些统计只用于审计 / 归档，不代表它们会进入 prompt 读路径（见 `PROMPT_INTEGRATION.md` §"Reader 的副作用契约"）
+
+#### Manual session summary 的合法 shape（playback-only 示例）
+
+一个 `remote_control play curious` 单次调用产生的 `sess_manual_*`，被下次 writer 启动自检补写的 summary **必须**严格符合以下 shape：
+
+```json
+{
+  "schema": "lelamp.memory.v0.session_summary",
+  "session_id": "sess_manual_2026-04-17_09-32-10",
+  "start_ts_ms": 1776432730000,
+  "end_ts_ms": 1776432732034,
+  "duration_s": 2,
+  "event_counts": {
+    "conversation": 0,
+    "function_tool": 0,
+    "fallback_expression": 0,
+    "playback": 1
+  },
+  "style_histogram": {},
+  "fallback_rate": null,
+  "top_recordings": ["curious"],
+  "narrative": null
+}
+```
+
+关键约束（必须由 writer 实现，reader / prompt_builder 必须容忍）：
+
+- **`event_counts` 的 4 个 kind 字段全部必填**，缺失的 kind 写 0 而非省略（方便下游直接 `d["conversation"]` 读）
+- **`fallback_rate` 是 `null`**，而不是 `0.0` / `0` / `NaN`
+- **`style_histogram` 是空对象 `{}`**，不是 `null`、不是省略
+- **`narrative` 恒为 `null`**（v0 强约束，见上）
+- `top_recordings` 的阶数来自 playback，没有时是空数组 `[]`
+
+这条"**统计字段可存在，但 prompt 读路径一律过滤 `sess_manual_*`**"的约束在 `PROMPT_INTEGRATION.md` §"Reader 的副作用契约" 里落到具体 section 上（`recent_conversation` / `playback_digest` / `style_tendency` 三处都一刀切过滤 `sess_manual_`）。
 
 ### 为什么 summary 不是事件
 
@@ -330,10 +416,14 @@ T=0.2s   smooth_animation entrypoint 进入
          writer 启动自检（flock 下）:
            - 若上次 agent 或 manual session 有 meta 无 summary → 补写
            - 若 recent_index.json 缺失/过期 → 扫最近 3 个 agent summary 重建
-         writer 写 sessions/sess_...meta.json（tmp+rename）
+         writer 写 sessions/sess_...meta.json 阶段 1 骨架（tmp+rename）
+           flags.motor_bus_enabled = null   # 显式"尚未裁定"
          writer 开启 events.jsonl append-only fd
-T=0.4s   MotorBusServer.start() 尝试 bind（可能成功，可能 bind retry 最终失败）
-         无论成败，meta.json 里 flags.motor_bus_enabled 已记录真实状态
+T=0.3s   MotorBusServer.start() 尝试 bind（可能成功，可能 bind retry 最终失败，
+         也可能 AnimationService.start() 先抛错，整个 arbiter 不启动）
+T=0.4s   writer 阶段 2：read meta.json → patch flags.motor_bus_enabled = true/false
+         → 同一份 meta.json 第二次 tmp+rename（flock 下）
+         若进程在此之前被 SIGKILL，flags.motor_bus_enabled 停留在 null
 T=2s     用户说"你好"；ASR commit → LLM response → 1 条 conversation 事件
          AutoExpression 350ms 到点前 LLM 调了 express("caring") → function_tool x2
          RGB 没变 → 0 条 playback
@@ -354,7 +444,8 @@ T=10s    用户在 terminal 执行: python -m lelamp.remote_control play curious
 T=10.0s  remote_control writer 调 attach_or_create_session():
            - 扫 sessions/*.meta.json 降序，发现最新 agent session 的 pid 不存活
            - 新建 sess_manual_2026-04-17_09-32-10
-           - 写 manual meta.json（pid=null，flags.source=standalone_writer）
+           - 写 manual meta.json（pid=null，flags.source=standalone_writer，
+             flags.motor_bus_enabled=null 且恒为 null，不做阶段 2）
 T=10.1s  remote_control 调 build_rgb_service_with_proxy / build_animation_service_with_proxy
          motor_bus sentinel 不存在 → 走 direct fallback（H0 语义）
 T=12s    play 完成，remote_control writer 写一条 playback(initiator=remote_control,
@@ -363,6 +454,11 @@ T=12s    play 完成，remote_control writer 写一条 playback(initiator=remote
           summary 由下次任意 writer 启动自检补）
 T=1h     sudo systemctl start lelamp
 T=1h+0.2s 新 agent writer 自检发现 sess_manual_... 有 meta 无 summary
-         → 扫残余 events 补 summary（只含 1 条 playback）
+         → 扫残余 events，按 §"*.summary.json" 的 manual shape 合约补 summary：
+             event_counts = {conversation:0, function_tool:0, fallback_expression:0, playback:1}
+             style_histogram = {}
+             fallback_rate = null   # conversation=0，禁止 0/0
+             top_recordings = ["curious"]
+             narrative = null
          → recent_index.json 重建时**不包含**这条 manual session
 ```
