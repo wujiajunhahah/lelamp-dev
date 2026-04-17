@@ -71,14 +71,14 @@ v0 的 session 概念是"**一次进程的活跃寿命**"；但 dashboard 和 `r
       "git_ref": null,
       "model_providers": [],
       "flags": {
-        "motor_bus_enabled": false,
+        "motor_bus_enabled": null,
         "fluxchi_enabled": false,
         "source": "standalone_writer"
       }
     }
     ```
 
-  - `pid=null` 和 `flags.source="standalone_writer"` 是 manual session 的**区分标记**，summary / recent_index 生成时可以选择性排除
+  - `pid=null` 和 `flags.source="standalone_writer"` 是 manual session 的**区分标记**；`flags.motor_bus_enabled = null` 表示"manual session 不对 arbiter 做裁定"。summary 仍可生成，但 `recent_index` / prompt 读路径会按 `sess_manual_*` 一律过滤
 - manual session 的 `summary.json` 在**下一个任意 writer 启动自检**里补写（writer 自检发现"有 meta 无 summary"→ 扫事件补 summary，对 manual session 同样适用）
 
 ### 场景 C：dashboard 和 CLI 同时并发，都没有 agent
