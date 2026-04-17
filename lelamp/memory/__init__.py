@@ -24,6 +24,7 @@ from .ids import (
     generate_session_id,
     is_manual_session,
 )
+from .reader import build_memory_header
 from .root import (
     DEFAULT_USER_ID,
     ensure_user_memory_root,
@@ -37,6 +38,7 @@ __all__ = [
     "DEFAULT_USER_ID",
     "MANUAL_SESSION_PREFIX",
     "SESSION_ID_RE",
+    "build_memory_header",
     "ensure_user_memory_root",
     "generate_event_id",
     "generate_invoke_id",
