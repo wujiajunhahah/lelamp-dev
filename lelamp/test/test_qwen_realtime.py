@@ -223,10 +223,13 @@ class QwenRealtimeTests(unittest.TestCase):
 
     def test_qwen_keeps_openai_style_empty_tool_schema(self) -> None:
         import main
+        import smooth_animation
 
         async def _build_event() -> dict[str, object]:
-            with patch.object(main, "AnimationService") as animation_service_cls, patch.object(
-                main, "RGBService"
+            with patch.object(
+                smooth_animation, "AnimationService"
+            ) as animation_service_cls, patch.object(
+                smooth_animation, "RGBService"
             ) as rgb_service_cls:
                 animation_service = Mock()
                 animation_service.start.return_value = None
@@ -274,10 +277,13 @@ class QwenRealtimeTests(unittest.TestCase):
 
     def test_qwen_expression_tool_exposes_small_style_enum(self) -> None:
         import main
+        import smooth_animation
 
         async def _build_event() -> dict[str, object]:
-            with patch.object(main, "AnimationService") as animation_service_cls, patch.object(
-                main, "RGBService"
+            with patch.object(
+                smooth_animation, "AnimationService"
+            ) as animation_service_cls, patch.object(
+                smooth_animation, "RGBService"
             ) as rgb_service_cls:
                 animation_service = Mock()
                 animation_service.start.return_value = None
@@ -497,6 +503,7 @@ class QwenRealtimeTests(unittest.TestCase):
 
     def test_motion_and_light_tools_return_quiet_success_markers(self) -> None:
         import main
+        import smooth_animation
 
         class FakeAnimationService:
             def __init__(self, **kwargs) -> None:
@@ -524,8 +531,10 @@ class QwenRealtimeTests(unittest.TestCase):
                 self.actions.append((event_type, payload))
 
         async def _exercise_quiet_tool_results() -> tuple[str, str]:
-            with patch.object(main, "AnimationService", FakeAnimationService), patch.object(
-                main, "RGBService", FakeRGBService
+            with patch.object(
+                smooth_animation, "AnimationService", FakeAnimationService
+            ), patch.object(
+                smooth_animation, "RGBService", FakeRGBService
             ), patch.dict(
                 os.environ,
                 {
@@ -549,6 +558,7 @@ class QwenRealtimeTests(unittest.TestCase):
 
     def test_expression_tool_dispatches_motion_and_light_together(self) -> None:
         import main
+        import smooth_animation
 
         class FakeAnimationService:
             def __init__(self, **kwargs) -> None:
@@ -576,8 +586,10 @@ class QwenRealtimeTests(unittest.TestCase):
                 self.actions.append((event_type, payload))
 
         async def _exercise_expression_tool() -> tuple[str, list[tuple[str, object]], list[tuple[str, object]]]:
-            with patch.object(main, "AnimationService", FakeAnimationService), patch.object(
-                main, "RGBService", FakeRGBService
+            with patch.object(
+                smooth_animation, "AnimationService", FakeAnimationService
+            ), patch.object(
+                smooth_animation, "RGBService", FakeRGBService
             ), patch.dict(
                 os.environ,
                 {

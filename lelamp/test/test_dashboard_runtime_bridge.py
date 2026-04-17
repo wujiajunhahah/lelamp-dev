@@ -1,6 +1,8 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
+from lelamp.dashboard import runtime_bridge as runtime_bridge_mod
 from lelamp.dashboard.runtime_bridge import DashboardRuntimeBridge
 
 
@@ -183,6 +185,51 @@ class DashboardRuntimeBridgeTests(unittest.TestCase):
         self.assertIn("failed", result.message.lower())
         self.assertIn("animation factory boom", result.detail)
         self.assertTrue(ExplodingAnimationFactory.called)
+
+    def test_startup_via_motor_bus_waits_for_completion(self) -> None:
+        # Proxy branch must not return success until wait_until_playback_complete
+        # signals done, otherwise dashboard busy lock releases mid-choreography
+        # and the next click shears the state machine.
+        settings = self._make_settings()
+        fake_sentinel = SimpleNamespace(
+            pid=1, port=0, base_url="http://127.0.0.1:0", started_at_ms=0
+        )
+
+        bridge = DashboardRuntimeBridge(
+            settings,
+            animation_factory=FakeAnimationService,
+            rgb_factory=FakeRGBService,
+            remote_module=SimpleNamespace(),
+        )
+
+        with patch.object(runtime_bridge_mod, "current_sentinel", return_value=fake_sentinel):
+            FakeAnimationService.wait_result = True
+            result = bridge.startup()
+
+        self.assertTrue(result.ok)
+        service = FakeAnimationService.instances[-1]
+        self.assertEqual(service.dispatched, [("startup", "wake_up")])
+
+    def test_startup_via_motor_bus_reports_timeout_when_wait_returns_false(self) -> None:
+        settings = self._make_settings()
+        fake_sentinel = SimpleNamespace(
+            pid=1, port=0, base_url="http://127.0.0.1:0", started_at_ms=0
+        )
+
+        bridge = DashboardRuntimeBridge(
+            settings,
+            animation_factory=FakeAnimationService,
+            rgb_factory=FakeRGBService,
+            remote_module=SimpleNamespace(),
+        )
+
+        with patch.object(runtime_bridge_mod, "current_sentinel", return_value=fake_sentinel):
+            FakeAnimationService.wait_result = False
+            result = bridge.startup()
+
+        self.assertFalse(result.ok)
+        self.assertIn("timed out", result.message.lower())
+        self.assertEqual(result.detail, "wake_up")
 
     def test_startup_converts_remote_exception_to_failed_result(self) -> None:
         settings = self._make_settings()

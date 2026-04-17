@@ -10,6 +10,12 @@ from .motion_profiles import (
     build_dynamic_startup_actions,
     build_staged_shutdown_actions,
 )
+from .motor_bus.client import (
+    REQUIRE_MOTOR,
+    build_animation_service as _build_animation_service_with_proxy,
+    build_rgb_service as _build_rgb_service_with_proxy,
+    current_sentinel,
+)
 from .pose_presets import write_pose_recordings
 from .pose_snapshot import upsert_env_value, write_static_recording
 from .runtime_config import load_runtime_settings
@@ -138,7 +144,7 @@ def _handle_list_recordings(args) -> int:
 
 
 def _handle_play(args) -> int:
-    service = _build_animation_service(args)
+    service = _build_animation_service_with_proxy(lambda: _build_animation_service(args))
     recordings = set(service.get_available_recordings())
 
     if args.name not in recordings:
@@ -163,7 +169,7 @@ def _handle_solid(args) -> int:
         print("RGB is disabled via LELAMP_ENABLE_RGB")
         return 1
 
-    service = _build_rgb_service(args)
+    service = _build_rgb_service_with_proxy(lambda: _build_rgb_service(args))
     service.handle_event("solid", (args.red, args.green, args.blue))
     print(f"Set RGB solid color to ({args.red}, {args.green}, {args.blue})")
     return 0
@@ -174,7 +180,7 @@ def _handle_clear(args) -> int:
         print("RGB is disabled via LELAMP_ENABLE_RGB")
         return 1
 
-    service = _build_rgb_service(args)
+    service = _build_rgb_service_with_proxy(lambda: _build_rgb_service(args))
     service.clear()
     print("Cleared RGB LEDs")
     return 0
@@ -238,6 +244,19 @@ def _handle_sync_pose_recordings(args) -> int:
 
 
 def _handle_startup(args) -> int:
+    # Only block direct-hardware startup when the agent actually owns the
+    # serial port (motor_ok == True). If the agent is alive but its
+    # AnimationService never came up, we let the caller try a direct
+    # recovery — matching the motor-domain fallback used by build_animation_service.
+    if current_sentinel(require=REQUIRE_MOTOR) is not None:
+        print(
+            "Voice agent is running and already owns the serial port; "
+            "staged startup via remote_control is not available. "
+            "Use the dashboard 'startup' action (routes via motor bus) or "
+            "stop the agent first."
+        )
+        return 2
+
     from .follower import LeLampFollower, LeLampFollowerConfig
 
     startup_recording = args.recording
@@ -291,6 +310,19 @@ def _handle_startup(args) -> int:
 
 
 def _handle_shutdown(args) -> int:
+    # Same motor-domain rule as _handle_startup: only refuse when the agent's
+    # motor path is actually live. motor_ok=False means the agent never
+    # acquired the bus, so direct torque-release can still run.
+    if current_sentinel(require=REQUIRE_MOTOR) is not None:
+        print(
+            "Voice agent is running and already owns the serial port; "
+            "staged shutdown with torque release is not available via "
+            "remote_control. Stop the agent first, or use the dashboard "
+            "'shutdown_pose' action (plays power_off via motor bus but "
+            "keeps torque enabled)."
+        )
+        return 2
+
     from .follower import LeLampFollower, LeLampFollowerConfig
 
     power_off_pose = _load_first_pose(args.recording)
