@@ -602,10 +602,13 @@ class GLMRealtimeTests(unittest.TestCase):
 
     def test_glm_tools_update_event_sanitizes_schema_for_glm(self) -> None:
         import main
+        import smooth_animation
 
         async def _build_event() -> dict[str, object]:
-            with patch.object(main, "AnimationService") as animation_service_cls, patch.object(
-                main, "RGBService"
+            with patch.object(
+                smooth_animation, "AnimationService"
+            ) as animation_service_cls, patch.object(
+                smooth_animation, "RGBService"
             ) as rgb_service_cls:
                 animation_service = Mock()
                 animation_service.start.return_value = None

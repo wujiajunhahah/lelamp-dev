@@ -1,10 +1,15 @@
 import os
+import socket
 import sys
 import tempfile
+import threading
+import time
 import types
 import unittest
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 if "livekit.plugins" not in sys.modules:
@@ -14,6 +19,68 @@ if "livekit.plugins" not in sys.modules:
     fake_livekit.plugins = fake_plugins
     sys.modules["livekit"] = fake_livekit
     sys.modules["livekit.plugins"] = fake_plugins
+
+
+def _pick_free_port() -> int:
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+class _LiveServer:
+    """Run uvicorn on a fixed port in a daemon thread for proxy tests."""
+
+    def __init__(self, app, port: int) -> None:
+        import uvicorn
+
+        self.port = port
+        self.base_url = f"http://127.0.0.1:{port}"
+        config = uvicorn.Config(
+            app,
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+            lifespan="off",
+            access_log=False,
+        )
+        self._server = uvicorn.Server(config)
+        self._thread = threading.Thread(target=self._server.run, daemon=True)
+
+    def __enter__(self) -> "_LiveServer":
+        self._thread.start()
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            if getattr(self._server, "started", False):
+                return self
+            time.sleep(0.05)
+        raise RuntimeError("test server failed to start")
+
+    def __exit__(self, *exc_info) -> None:
+        self._server.should_exit = True
+        self._thread.join(timeout=3.0)
+
+
+class _sentinel_ctx:
+    """Context manager that writes a sentinel into a test-specific path and cleans up."""
+
+    def __init__(self, sentinel_mod, info) -> None:
+        self._sentinel_mod = sentinel_mod
+        self._info = info
+        self._path = Path(
+            os.environ.get("TMPDIR", "/tmp")
+        ) / f"lelamp-motor-bus-remote-test-{os.getpid()}.json"
+        self._env_patcher = patch.dict(
+            os.environ, {"LELAMP_MOTOR_BUS_SENTINEL": str(self._path)}
+        )
+
+    def __enter__(self):
+        self._env_patcher.start()
+        self._sentinel_mod.write_sentinel(self._info)
+        return self
+
+    def __exit__(self, *exc_info):
+        self._sentinel_mod.remove_sentinel()
+        self._env_patcher.stop()
 
 
 def _fake_runtime_modules(include_follower: bool = False) -> dict[str, types.ModuleType]:
@@ -173,6 +240,132 @@ class RemoteControlConfigTests(unittest.TestCase):
         self.assertEqual(service.dispatched, [("play", "curious")])
         self.assertEqual(service.wait_timeout, 12.0)
         self.assertTrue(service.stopped)
+
+    def test_handle_solid_routes_via_rgb_proxy_when_agent_alive(self) -> None:
+        with patch.dict(sys.modules, _fake_runtime_modules(), clear=False):
+            sys.modules.pop("lelamp.remote_control", None)
+            from lelamp import remote_control
+
+        from fastapi import FastAPI  # noqa: F401 (imported inside guarded block below)
+
+        from lelamp.motor_bus import sentinel as sentinel_mod
+        from lelamp.motor_bus.server import build_app
+
+        class _FakeRGB:
+            def __init__(self) -> None:
+                self.dispatched: list[tuple[str, Any]] = []
+                self.cleared = False
+
+            def dispatch(self, event_type: str, payload: Any) -> None:
+                self.dispatched.append((event_type, payload))
+
+            def clear(self) -> None:
+                self.cleared = True
+
+        rgb = _FakeRGB()
+        app = build_app(
+            animation_service=SimpleNamespace(
+                get_available_recordings=lambda: [],
+                dispatch=lambda *_: None,
+                wait_until_playback_complete=lambda timeout=None: True,
+            ),
+            get_animation_service_error=lambda: None,
+            rgb_service=rgb,
+            led_count=40,
+        )
+
+        port = _pick_free_port()
+        base_url = f"http://127.0.0.1:{port}"
+        with _LiveServer(app, port) as _srv, _sentinel_ctx(
+            sentinel_mod,
+            sentinel_mod.SentinelInfo(
+                pid=os.getpid(),
+                port=port,
+                base_url=base_url,
+                started_at_ms=1,
+            ),
+        ):
+            def _fail_direct() -> None:
+                raise AssertionError(
+                    "direct RGBService factory should not fire while proxy is reachable"
+                )
+
+            with patch.object(remote_control, "_build_rgb_service", side_effect=_fail_direct):
+                args = SimpleNamespace(
+                    enable_rgb=True, red=10, green=20, blue=30,
+                )
+                self.assertEqual(remote_control._handle_solid(args), 0)
+
+                args_clear = SimpleNamespace(enable_rgb=True)
+                self.assertEqual(remote_control._handle_clear(args_clear), 0)
+
+        self.assertEqual(rgb.dispatched, [("solid", (10, 20, 30))])
+        self.assertTrue(rgb.cleared)
+
+    def test_handle_startup_refuses_when_agent_motor_live(self) -> None:
+        with patch.dict(sys.modules, _fake_runtime_modules(include_follower=True), clear=False):
+            sys.modules.pop("lelamp.remote_control", None)
+            from lelamp import remote_control
+
+        fake_sentinel = SimpleNamespace(
+            pid=os.getpid(),
+            port=8770,
+            base_url="http://127.0.0.1:8770",
+            started_at_ms=1,
+        )
+        args = SimpleNamespace(
+            recording="wake_up",
+            home_recording="home_safe",
+            port="/dev/ttyACM0",
+            id="lelamp",
+            enable_rgb=False,
+            settle_frames=0,
+            settle_hold_frames=0,
+            settle_fps=30,
+            wake_fps=30,
+            post_wake_hold=0.0,
+            led_count=40,
+            led_pin=12,
+            led_freq_hz=800000,
+            led_dma=10,
+            led_brightness=255,
+            led_invert=False,
+            led_channel=0,
+        )
+        with patch.object(
+            remote_control,
+            "current_sentinel",
+            return_value=fake_sentinel,
+        ) as spy:
+            self.assertEqual(remote_control._handle_startup(args), 2)
+            # Must probe the motor domain, not generic "any"; otherwise an
+            # agent that failed to acquire the bus would still get refused.
+            spy.assert_called_once_with(require=remote_control.REQUIRE_MOTOR)
+
+    def test_handle_shutdown_refuses_when_agent_motor_live(self) -> None:
+        with patch.dict(sys.modules, _fake_runtime_modules(include_follower=True), clear=False):
+            sys.modules.pop("lelamp.remote_control", None)
+            from lelamp import remote_control
+
+        fake_sentinel = SimpleNamespace(
+            pid=os.getpid(),
+            port=8770,
+            base_url="http://127.0.0.1:8770",
+            started_at_ms=1,
+        )
+        args = SimpleNamespace(
+            recording="power_off",
+            port="/dev/ttyACM0",
+            id="lelamp",
+            fps=30,
+        )
+        with patch.object(
+            remote_control,
+            "current_sentinel",
+            return_value=fake_sentinel,
+        ) as spy:
+            self.assertEqual(remote_control._handle_shutdown(args), 2)
+            spy.assert_called_once_with(require=remote_control.REQUIRE_MOTOR)
 
     def test_handle_sync_pose_recordings_writes_default_pose_files_and_env(self) -> None:
         with patch.dict(sys.modules, _fake_runtime_modules(), clear=False):

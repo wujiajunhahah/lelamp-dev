@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import atexit
 import logging
 import subprocess
 
@@ -28,6 +29,7 @@ from lelamp.voice_profile import (
 )
 from lelamp.auto_expression import AutoExpressionController
 from lelamp.expression_engine import ExpressionStyle, dispatch_expression
+from lelamp.motor_bus.server import MotorBusServer
 from lelamp.service.motors.animation_service import AnimationService
 from lelamp.service.rgb.rgb_service import RGBService
 
@@ -277,6 +279,30 @@ async def entrypoint(ctx: agents.JobContext):
             led_count=agent.settings.led_count,
         )
         agent.auto_expression_controller.start()
+
+    motor_bus_server: MotorBusServer | None = None
+    try:
+        motor_bus_server = MotorBusServer(
+            animation_service=agent.animation_service,
+            get_animation_service_error=lambda: agent.animation_service_error,
+            rgb_service=agent.rgb_service,
+            led_count=agent.settings.led_count,
+        )
+        motor_bus_server.start()
+        if motor_bus_server.is_ready():
+            logger.info(
+                "motor bus server ready on %s:%s; dashboard/CLI will route via proxy",
+                motor_bus_server.host,
+                motor_bus_server.port,
+            )
+        else:
+            logger.warning("motor bus server failed to start; dashboard/CLI will contend for hardware")
+    except Exception:
+        logger.exception("motor bus server bootstrap failed")
+        motor_bus_server = None
+
+    if motor_bus_server is not None:
+        atexit.register(motor_bus_server.stop)
 
     session_kwargs = {"llm": build_realtime_model(agent.settings)}
     should_install_console_audio_patch = (
