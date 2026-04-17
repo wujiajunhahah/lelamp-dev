@@ -254,11 +254,12 @@ def _write_meta_phase1_locked(
 class SessionHandle:
     """Handle for the current process's session.
 
-    Callers create a handle via :func:`start_agent_session` or
-    :func:`attach_or_create_session`; only the owning writer calls
-    :meth:`set_motor_bus_enabled` (agent phase 2).  :meth:`close`
-    flips an internal flag; summary writing + recent_index rebuild
-    are grafted on by :mod:`lelamp.memory.selfcheck` once it lands.
+    ``is_owner`` flips to ``False`` when a writer *attaches* to an
+    existing live agent session (scenario A): in that case the
+    attaching process must not close the session's summary on exit --
+    only the agent process that wrote phase 1 is allowed to finalize
+    its own session.  This prevents dashboard / remote_control from
+    accidentally racing the agent to summary.json.
     """
 
     session_id: str
@@ -266,6 +267,7 @@ class SessionHandle:
     writer: MemoryWriter
     meta_path: Path
     start_ts_ms: int
+    is_owner: bool = True
     _closed: bool = field(default=False, repr=False)
 
     def set_motor_bus_enabled(self, enabled: Optional[bool]) -> None:
@@ -295,16 +297,49 @@ class SessionHandle:
             meta["flags"] = flags
             _atomic_write_json(self.meta_path, meta)
 
-    def close(self) -> None:
-        """Mark the handle closed.
+    def close(self, *, end_ts_ms: Optional[int] = None) -> None:
+        """Finalize the session: write summary + rebuild recent_index.
 
-        Summary / recent_index writes are wired in by
-        :mod:`lelamp.memory.selfcheck`; this method is idempotent so
-        integration callers can hook it to both ``atexit`` and a manual
-        shutdown path without worrying about double-fire.
+        Idempotent: repeat calls are no-ops.  Non-owner handles
+        (attached dashboards / CLI) skip the summary + index writes
+        entirely so only the agent process owns the close path.
+
+        This method swallows writer-side exceptions to match the
+        LIFECYCLE "memory must never kill runtime" rule -- a failed
+        close is logged, and the next writer start will pick up the
+        pieces via :mod:`lelamp.memory.selfcheck`.
         """
 
+        if self._closed:
+            return
         self._closed = True
+        if not self.is_owner:
+            return
+        # Lazy import to avoid a module-level cycle with summary /
+        # recent_index, both of which import from this module.
+        from .summary import compute_and_write_summary
+        from .recent_index import rebuild_recent_index
+
+        try:
+            compute_and_write_summary(
+                self.writer,
+                self.session_id,
+                start_ts_ms=self.start_ts_ms,
+                end_ts_ms=end_ts_ms,
+            )
+        except Exception:
+            _logger.exception(
+                "memory: compute_and_write_summary failed for %s",
+                self.session_id,
+            )
+            return
+        try:
+            rebuild_recent_index(self.writer)
+        except Exception:
+            _logger.exception(
+                "memory: rebuild_recent_index failed after closing %s",
+                self.session_id,
+            )
 
     @property
     def closed(self) -> bool:
@@ -411,7 +446,8 @@ def attach_or_create_session(
         metas = _iter_meta_candidates(writer)
         live = _find_live_agent_session(metas)
         if live is not None:
-            # Attach: no meta write, handle is read-only.
+            # Attach: no meta write, handle is explicitly non-owner so
+            # the attaching process won't race the agent at close().
             meta_path = live["_path"]
             return SessionHandle(
                 session_id=live["session_id"],
@@ -419,6 +455,7 @@ def attach_or_create_session(
                 writer=writer,
                 meta_path=meta_path,
                 start_ts_ms=int(live.get("start_ts_ms") or 0),
+                is_owner=False,
             )
         session_id, meta_path, start_ts_ms = _write_meta_phase1_locked(
             writer,
@@ -431,6 +468,7 @@ def attach_or_create_session(
         writer=writer,
         meta_path=meta_path,
         start_ts_ms=start_ts_ms,
+        is_owner=True,
     )
 
 
