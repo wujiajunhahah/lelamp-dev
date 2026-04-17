@@ -277,6 +277,61 @@ class MotorBusServerBindRetryTests(unittest.TestCase):
             self.assertFalse(bus.is_ready())
             write_sentinel.assert_not_called()
 
+    def test_port_is_free_probe_sets_reuseaddr(self) -> None:
+        import socket as socket_module
+
+        from lelamp.motor_bus import server as server_module
+
+        fake_sock = mock.MagicMock()
+        fake_sock.__enter__.return_value = fake_sock
+        fake_sock.__exit__.return_value = False
+
+        with mock.patch.object(server_module.socket, "socket", return_value=fake_sock) as mk:
+            result = server_module._port_is_free("127.0.0.1", 8770)
+
+        mk.assert_called_once_with(socket_module.AF_INET, socket_module.SOCK_STREAM)
+        setsockopt_calls = [c for c in fake_sock.mock_calls if c[0] == "setsockopt"]
+        self.assertIn(
+            mock.call.setsockopt(socket_module.SOL_SOCKET, socket_module.SO_REUSEADDR, 1),
+            fake_sock.mock_calls,
+            "probe socket must set SO_REUSEADDR to match uvicorn; otherwise "
+            "TIME_WAIT remnants are wrongly reported as busy for up to "
+            "tcp_fin_timeout (~60s). See docs/acceptance/H0_pi_acceptance_20260418.md",
+        )
+        self.assertEqual(len(setsockopt_calls), 1, "exactly one setsockopt call expected")
+        fake_sock.bind.assert_called_once_with(("127.0.0.1", 8770))
+        self.assertTrue(result)
+
+    def test_port_is_free_probe_returns_false_on_bind_error(self) -> None:
+        from lelamp.motor_bus import server as server_module
+
+        fake_sock = mock.MagicMock()
+        fake_sock.__enter__.return_value = fake_sock
+        fake_sock.__exit__.return_value = False
+        fake_sock.bind.side_effect = OSError("EADDRINUSE")
+
+        with mock.patch.object(server_module.socket, "socket", return_value=fake_sock):
+            result = server_module._port_is_free("127.0.0.1", 8770)
+
+        self.assertFalse(result)
+
+    def test_start_default_retry_is_thirty_seconds(self) -> None:
+        # Regression guard for H0.3: 12s was insufficient to cover a listener
+        # whose owner PID was still alive ~1-2s after systemctl restart plus
+        # an overlap with the kernel's TIME_WAIT bookkeeping. Default must
+        # stay at 30s unless the retry budget is revisited deliberately.
+        import inspect
+
+        from lelamp.motor_bus import server as server_module
+
+        sig = inspect.signature(server_module.MotorBusServer.start)
+        self.assertEqual(
+            sig.parameters["bind_retry_total_s"].default,
+            30.0,
+            "default bind_retry_total_s must be 30.0; see H0.3 in "
+            "docs/acceptance/H0_pi_acceptance_20260418.md",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

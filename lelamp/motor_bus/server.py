@@ -176,7 +176,16 @@ def build_app(
 
 
 def _port_is_free(host: str, port: int) -> bool:
+    # Must match the flags uvicorn applies to the real listener: without
+    # SO_REUSEADDR the probe rejects TIME_WAIT sockets even though uvicorn
+    # would successfully bind past them. See H0 Pi acceptance report
+    # (docs/acceptance/H0_pi_acceptance_20260418.md) for the failure mode:
+    # fast systemctl restart leaves 8770 in TIME_WAIT for up to
+    # tcp_fin_timeout (~60s), so a probe that never sets SO_REUSEADDR will
+    # report busy forever within the 12s retry window even though uvicorn
+    # itself could bind in milliseconds.
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((host, port))
         except OSError:
@@ -213,7 +222,7 @@ class MotorBusServer:
         self,
         ready_timeout: float = 3.0,
         *,
-        bind_retry_total_s: float = 12.0,
+        bind_retry_total_s: float = 30.0,
         bind_retry_interval_s: float = 0.5,
     ) -> None:
         if self._thread is not None:
@@ -228,7 +237,11 @@ class MotorBusServer:
         # whole arbiter stays dark for the lifetime of the new agent, forcing
         # dashboard / CLI back into direct hardware contention. Probing every
         # ~0.5s for up to bind_retry_total_s gives the kernel enough time to
-        # release the port.
+        # release the port. 30s covers the ~1-2s overlap when an old MainPID
+        # is still holding the listener after a fast systemctl restart, plus
+        # a safety margin for slow shutdowns. Probe socket sets SO_REUSEADDR
+        # to match uvicorn (see _port_is_free); without this the probe rejects
+        # TIME_WAIT residue for up to tcp_fin_timeout (~60s).
         deadline = time.time() + max(0.0, bind_retry_total_s)
         first = True
         while True:
