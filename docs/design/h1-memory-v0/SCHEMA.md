@@ -30,7 +30,7 @@
 | `event_id` | ULID / UUID 字符串 | ✅ | 单机生成，用于幂等 / 去重 |
 | `ts_ms` | int64 epoch ms | ✅ | 毫秒精度；writer 必须用 `time.time_ns()//1_000_000` 这类单调合规来源 |
 | `user_id` | 字符串 | ✅ | v0 固定 `"default"`；非法值写入器直接 reject |
-| `session_id` | 字符串 | ✅ | 见 `LIFECYCLE.md` 里的定义 |
+| `session_id` | 字符串 | ✅ | 见 `LIFECYCLE.md`；agent 进程用 `sess_<ts>`，dashboard / remote_control 独立运行时用 `sess_manual_<ts>`。由 `attach_or_create_session()` 统一分配，**不得**自造 |
 | `kind` | 枚举 | ✅ | 仅 4 个值 |
 | `source` | 枚举 | ✅ | 事件由哪个进程产生 |
 | `payload` | object | ✅ | 按 `kind` 不同分支；不允许空对象，必须至少有 `payload_version` |

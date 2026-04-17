@@ -115,7 +115,7 @@ $HOME/.lelamp/memory/
 ├─────────────────────────────────────────────────────────────┤
 │ 1. lelamp.service (smooth_animation.py)                     │
 │    - conversation / function_tool / fallback_expression     │
-│    - function_tool / playback (当 voice_agent 调工具时)     │
+│    - function_tool (voice_agent 调工具时；不重复写 playback) │
 │ 2. dashboard (uvicorn)                                      │
 │    - playback (手动点按钮)                                  │
 │ 3. python -m lelamp.remote_control                          │
@@ -135,6 +135,8 @@ $HOME/.lelamp/memory/
 - 用 `fcntl.flock(LOCK_EX)` 保证跨进程互斥；`flock` 在 Pi 上的 ext4 是可靠的
 - 锁粒度 = 单次 append（通常 < 1ms）；**不允许**长时间持锁
 - `remote_control` 本来是**短命进程**，起来写一条就 exit，也走同一把锁
+- **Session 归属**：dashboard 和 remote_control 写入前必须调 `attach_or_create_session()`：优先依附到存活 agent session；agent 不在就新建 `sess_manual_<ts>`。详见 `LIFECYCLE.md` §"Agent session vs manual session"
+- 去重契约：voice-agent 调工具产生的硬件动作由 `function_tool` 唯一承载，**不**再写一条 playback。见 `SCHEMA.md` §"去重契约"
 
 ---
 
@@ -167,14 +169,12 @@ H1 reader（prompt 注入层）不碰：
 
 v0 的目标上限：
 
-
-| 项                 | 预算        | 说明                                |
-| ----------------- | --------- | --------------------------------- |
-| 单条事件              | ≤ 2 KiB   | 超出说明 payload 膨胀，触发 writer warning |
-| 活跃 `events.jsonl` | ≤ 10 MiB  | 触发 rotate，见 LIFECYCLE             |
-| 单 session summary | ≤ 4 KiB   | LLM 总结产物，强裁剪                      |
-| 全部归档累计            | ≤ 200 MiB | 触达后给 user 一个清理提示，不自动删             |
-| 总目录               | ≤ 256 MiB | 超出视为异常，要人工干预                      |
-
+| 项 | 预算 | 说明 |
+|---|---|---|
+| 单条事件 | ≤ 2 KiB | 超出说明 payload 膨胀，触发 writer warning |
+| 活跃 `events.jsonl` | ≤ 10 MiB | 触发 rotate，见 LIFECYCLE |
+| 单 session summary | ≤ 4 KiB | LLM 总结产物，强裁剪 |
+| 全部归档累计 | ≤ 200 MiB | 触达后给 user 一个清理提示，不自动删 |
+| 总目录 | ≤ 256 MiB | 超出视为异常，要人工干预 |
 
 这些预算都是**观察口径**，不是硬约束。实现阶段的 writer 可以打 `WARN` 但**不主动删数据**。
