@@ -13,8 +13,15 @@ class FakeAnimationService:
     def __init__(self, recordings: list[str] | None = None) -> None:
         self.recordings = recordings or ["wake_up", "home_safe", "power_off"]
         self.dispatched: list[tuple[str, Any]] = []
-        self._done = threading.Event()
-        self._done.set()
+        # Matches the real AnimationService attribute name so the server's
+        # pre-dispatch gate (server.py::_arm_playback_gate) reaches into it.
+        self._playback_done = threading.Event()
+        self._playback_done.set()
+
+    # Convenience alias kept for tests that speak begin/end semantics.
+    @property
+    def _done(self) -> threading.Event:
+        return self._playback_done
 
     def get_available_recordings(self) -> list[str]:
         return list(self.recordings)
@@ -23,13 +30,13 @@ class FakeAnimationService:
         self.dispatched.append((event_type, payload))
 
     def begin_playback(self) -> None:
-        self._done.clear()
+        self._playback_done.clear()
 
     def end_playback(self) -> None:
-        self._done.set()
+        self._playback_done.set()
 
     def wait_until_playback_complete(self, timeout: float | None = None) -> bool:
-        return self._done.wait(timeout=timeout)
+        return self._playback_done.wait(timeout=timeout)
 
 
 class FakeRGBService:
@@ -194,6 +201,81 @@ class MotorBusServerTests(unittest.TestCase):
         resp = client.post("/motor/wait_complete", json={"timeout": 999.0})
         # pydantic Field(le=180.0) rejects with 422.
         self.assertEqual(resp.status_code, 422)
+
+    def test_play_pre_clears_playback_done_gate(self) -> None:
+        # Regression guard for the race exposed on Pi: without pre-clearing the
+        # completion event inside /motor/play the subsequent /motor/wait_complete
+        # observed the previous done=True state and returned immediately, letting
+        # the dashboard busy lock release before the real playback had started.
+        animation = FakeAnimationService()
+        self.assertTrue(animation._playback_done.is_set())
+        client, _, _ = _build_client(animation=animation)
+        resp = client.post("/motor/play", json={"recording_name": "wake_up"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(
+            animation._playback_done.is_set(),
+            "play endpoint must arm the completion gate before event_loop picks up the event",
+        )
+
+    def test_startup_pre_clears_playback_done_gate(self) -> None:
+        animation = FakeAnimationService()
+        self.assertTrue(animation._playback_done.is_set())
+        client, _, _ = _build_client(animation=animation)
+        resp = client.post("/motor/startup", json={"recording_name": "wake_up"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(animation._playback_done.is_set())
+
+
+class MotorBusServerBindRetryTests(unittest.TestCase):
+    def test_start_retries_bind_until_port_frees(self) -> None:
+        from lelamp.motor_bus import server as server_module
+
+        busy_iterations = [False, False, True]  # free on 3rd probe
+
+        def fake_port_is_free(host: str, port: int) -> bool:
+            return busy_iterations.pop(0)
+
+        bus = server_module.MotorBusServer(
+            animation_service=FakeAnimationService(),
+            get_animation_service_error=lambda: None,
+            rgb_service=None,
+            led_count=40,
+        )
+
+        with mock.patch.object(server_module, "_port_is_free", side_effect=fake_port_is_free), \
+             mock.patch.object(server_module.time, "sleep"), \
+             mock.patch.object(server_module, "write_sentinel") as write_sentinel, \
+             mock.patch("uvicorn.Config"), \
+             mock.patch("uvicorn.Server") as FakeServer, \
+             mock.patch.object(server_module.threading, "Thread") as FakeThread:
+            fake_server = mock.Mock()
+            fake_server.started = True
+            FakeServer.return_value = fake_server
+            FakeThread.return_value = mock.Mock()
+
+            bus.start(ready_timeout=0.2, bind_retry_total_s=5.0, bind_retry_interval_s=0.01)
+
+            self.assertEqual(busy_iterations, [])
+            self.assertTrue(bus.is_ready())
+            write_sentinel.assert_called_once()
+
+    def test_start_gives_up_after_retry_deadline(self) -> None:
+        from lelamp.motor_bus import server as server_module
+
+        bus = server_module.MotorBusServer(
+            animation_service=FakeAnimationService(),
+            get_animation_service_error=lambda: None,
+            rgb_service=None,
+            led_count=40,
+        )
+
+        with mock.patch.object(server_module, "_port_is_free", return_value=False), \
+             mock.patch.object(server_module.time, "sleep"), \
+             mock.patch.object(server_module, "write_sentinel") as write_sentinel:
+            bus.start(ready_timeout=0.2, bind_retry_total_s=0.0, bind_retry_interval_s=0.01)
+
+            self.assertFalse(bus.is_ready())
+            write_sentinel.assert_not_called()
 
 
 if __name__ == "__main__":

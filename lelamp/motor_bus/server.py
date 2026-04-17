@@ -87,12 +87,24 @@ def build_app(
         except Exception as exc:
             raise HTTPException(500, f"failed to list recordings: {exc}")
 
+    def _arm_playback_gate() -> None:
+        # Pre-clears the completion event BEFORE queuing the dispatch so that a
+        # subsequent /motor/wait_complete observes the in-flight playback
+        # instead of the previous (still-set) done signal. Without this, the
+        # queued event is only processed on the next event_loop tick, leaving
+        # a racy window where wait_until_playback_complete returns True
+        # immediately after a fresh dispatch.
+        gate = getattr(animation_service, "_playback_done", None)
+        if gate is not None:
+            gate.clear()
+
     @app.post("/motor/play")
     def play(req: PlayRequest) -> dict[str, Any]:
         err = get_animation_service_error()
         if err is not None:
             raise HTTPException(503, f"motion unavailable: {err}")
         try:
+            _arm_playback_gate()
             animation_service.dispatch("play", req.recording_name)
         except Exception as exc:
             raise HTTPException(500, f"dispatch failed: {exc}")
@@ -104,6 +116,7 @@ def build_app(
         if err is not None:
             raise HTTPException(503, f"motion unavailable: {err}")
         try:
+            _arm_playback_gate()
             animation_service.dispatch("startup", req.recording_name)
         except Exception as exc:
             raise HTTPException(500, f"dispatch failed: {exc}")
@@ -196,7 +209,13 @@ class MotorBusServer:
         self._thread: Optional[threading.Thread] = None
         self._ready = threading.Event()
 
-    def start(self, ready_timeout: float = 3.0) -> None:
+    def start(
+        self,
+        ready_timeout: float = 3.0,
+        *,
+        bind_retry_total_s: float = 12.0,
+        bind_retry_interval_s: float = 0.5,
+    ) -> None:
         if self._thread is not None:
             raise RuntimeError("MotorBusServer already started")
 
@@ -204,13 +223,34 @@ class MotorBusServer:
         # (e.g. unit tests that build app() directly) can avoid the import.
         import uvicorn
 
-        if not _port_is_free(self.host, self.port):
-            # If the port is already taken, do NOT write a sentinel. The caller
-            # should check is_ready() to decide whether to continue.
-            logger.warning(
-                "motor bus port %s:%s is busy; server not started", self.host, self.port
-            )
-            return
+        # Brief bind retry: when systemd restarts the agent quickly, the prior
+        # listener's TCP socket may still be in TIME_WAIT. Without a retry the
+        # whole arbiter stays dark for the lifetime of the new agent, forcing
+        # dashboard / CLI back into direct hardware contention. Probing every
+        # ~0.5s for up to bind_retry_total_s gives the kernel enough time to
+        # release the port.
+        deadline = time.time() + max(0.0, bind_retry_total_s)
+        first = True
+        while True:
+            if _port_is_free(self.host, self.port):
+                break
+            if time.time() >= deadline:
+                logger.warning(
+                    "motor bus port %s:%s is busy; server not started (waited %.1fs)",
+                    self.host,
+                    self.port,
+                    bind_retry_total_s,
+                )
+                return
+            if first:
+                logger.info(
+                    "motor bus port %s:%s busy; retrying bind for up to %.1fs",
+                    self.host,
+                    self.port,
+                    bind_retry_total_s,
+                )
+                first = False
+            time.sleep(max(0.05, bind_retry_interval_s))
 
         config = uvicorn.Config(
             self._app,
