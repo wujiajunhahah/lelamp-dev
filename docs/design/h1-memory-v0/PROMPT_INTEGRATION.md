@@ -166,10 +166,18 @@ HARDWARE USAGE (recent 10)
 
 `build_memory_header()` 必须：
 
-- **纯读**：不写任何文件、不改 profile / recent_index
+- **纯读**：不写任何文件、不改 profile / recent_index / summary / events.jsonl
+  - 即使 `recent_index.json` 缺失、过期、损坏——**不修复、不重建**
+  - 即使发现孤儿 `function_tool.invoke`（无 result）——**不补 result**
+  - 任何"修盘"需求都落在 writer 侧（见 `LIFECYCLE.md` §"Session 的定义" 和 §"summary / recent_index 缺失"），reader 只观察
 - **同步**：启动时一次性构建，注入 prompt；不在每轮 turn 里重建
 - **幂等**：给同一组磁盘状态，多次调用产生**字节级相同**的字符串（便于 diff / test）
-- **可降级**：memory 目录不存在 / 损坏 → 返回空字符串或一条 `<memory status="unavailable"/>`，**不抛异常**
+- **可降级（三级）**：
+  1. **normal**：`recent_index.json` 存在且新鲜 → 走索引路径，O(1) 打开 3 个 summary 文件
+  2. **degraded**：`recent_index.json` 缺失 / 过期（`built_at_ms < events.jsonl.mtime`）→ 直接 `sorted(ls sessions/*.summary.json, reverse=True)[:3]` 取最近 3 个读，**不写索引**
+  3. **fallback**：连 `sessions/` 都不存在 / 全是坏 JSON → 返回空字符串或 `<memory status="unavailable"/>`，**不抛异常**
+
+这三级都**不写盘**。writer 进程下次启动时会在自检阶段把 index 补齐，reader 下一次启动就能回到 normal。
 
 ### 在哪一步注入
 

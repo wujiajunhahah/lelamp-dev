@@ -27,17 +27,15 @@ H1 v0 **只写设计**，不写代码；实现等这份设计稿被自己和 cod
 
 以下全部在 v0 **显式排除**。任何后续 PR 如果触碰这些，必须单独立项，不能夹带。
 
-
-| 排除项                     | 理由                                                                                                                                                       |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **intervene 事件**        | FluxChi 的 `POST /api/intervene` 在当前 dashboard `api.py` 里并不存在（只有 `/api/state` / `/api/actions/*` / `/api/lights/*`）。在代码里还没落地的信号，不能进 schema，否则 v0 就是一堆空字段。 |
-| **多用户**                 | v0 固定 `user_id = "default"`。"识别说话人"需要额外的 speaker ID / face recognition，和 memory 正交。留到 v1 再谈。                                                             |
-| **学习策略 / policy / ACT** | "用记忆训练策略"是 H2 的事。v0 只做**读出来人能看懂、prompt 注进去模型能用**的层。                                                                                                      |
-| **共享呼吸 / 色温 / 相位**      | 这是 H1b 的 scope，`LELAMP_DASHBOARD` 的 RGBService 目前只支持 `solid / paint` + 全局 brightness，连色温都不是一等能力。H1b 单独分支。                                                |
-| **主动打断 / 情绪触发语音**       | v0 不从记忆层反向驱动任何动作。记忆是**被读**的，不是**主动发**的。                                                                                                                  |
-| **跨设备同步**               | 单机文件即可。云同步 / 多台 lelamp 共享记忆不在 v0。                                                                                                                        |
-| **加密 / 合规**             | v0 明文 JSON，放在用户自己的 Pi 上。隐私合规到产品化阶段再谈。                                                                                                                    |
-
+| 排除项 | 理由 |
+|---|---|
+| **intervene 事件** | FluxChi 的 `POST /api/intervene` 在当前 dashboard `api.py` 里并不存在（只有 `/api/state` / `/api/actions/*` / `/api/lights/*`）。在代码里还没落地的信号，不能进 schema，否则 v0 就是一堆空字段。 |
+| **多用户** | v0 固定 `user_id = "default"`。"识别说话人"需要额外的 speaker ID / face recognition，和 memory 正交。留到 v1 再谈。 |
+| **学习策略 / policy / ACT** | "用记忆训练策略"是 H2 的事。v0 只做**读出来人能看懂、prompt 注进去模型能用**的层。 |
+| **共享呼吸 / 色温 / 相位** | 这是 H1b 的 scope，`LELAMP_DASHBOARD` 的 RGBService 目前只支持 `solid / paint` + 全局 brightness，连色温都不是一等能力。H1b 单独分支。 |
+| **主动打断 / 情绪触发语音** | v0 不从记忆层反向驱动任何动作。记忆是**被读**的，不是**主动发**的。 |
+| **跨设备同步** | 单机文件即可。云同步 / 多台 lelamp 共享记忆不在 v0。 |
+| **加密 / 合规** | v0 明文 JSON，放在用户自己的 Pi 上。隐私合规到产品化阶段再谈。 |
 
 ---
 
@@ -47,14 +45,15 @@ H1 v0 **只写设计**，不写代码；实现等这份设计稿被自己和 cod
 
 v0 只记录 4 类事件，全部是**已经在运行时真实发生、有明确生产点**的信号：
 
-1. `**conversation`** — voice agent 的一轮 user/assistant turn
-  - 生产点：`lelamp/local_voice/*` 的 ASR commit + LLM response
-2. `**function_tool**` — agent 调用 `express / play_recording / set_rgb_solid / paint_rgb_pattern / set_volume` 的记录
-  - 生产点：`smooth_animation.py` 里的 `LeLamp` 方法
-3. `**fallback_expression**` — `AutoExpressionController` 350ms 超时后派发的默认表情
-  - 生产点：`lelamp/auto_expression.py`
-4. `**playback**` — dashboard 或 CLI 发起的 `play / startup / shutdown_pose / light solid / light clear`
+1. **`conversation`** — voice agent 的一轮 user/assistant turn
+   - 生产点：`lelamp/local_voice/*` 的 ASR commit + LLM response
+2. **`function_tool`** — agent 调用 `express / play_recording / set_rgb_solid / paint_rgb_pattern / set_volume` 的记录
+   - 生产点：`smooth_animation.py` 里的 `LeLamp` 方法
+3. **`fallback_expression`** — `AutoExpressionController` 350ms 超时后派发的默认表情
+   - 生产点：`lelamp/auto_expression.py`
+4. **`playback`** — **仅** dashboard 或 CLI 发起的 `play / startup / shutdown_pose / light solid / light clear`
   - 生产点：`lelamp/dashboard/runtime_bridge.py` + `lelamp/remote_control.py`
+  - **不包含** voice-agent 调 `play_recording` / `set_rgb_solid` 等工具产生的硬件动作——那些由 `function_tool` 唯一承载，避免双写失真。详见 `SCHEMA.md` §"去重契约"。
 
 **不要**超出这 4 类。如果日后想加，走 v0.x 小版本升级，不叫 v1。
 
@@ -64,23 +63,21 @@ v0 只记录 4 类事件，全部是**已经在运行时真实发生、有明确
 v0 明确：
 
 - 一次 session 启动时从 memory 抽出一个**有预算的、有裁剪规则的** `memory_header`
-- 插到现有 `voice_profile.py` 的 system prompt **之前**，用 `<memory>` / `</memory>` 标签包起来
+- 插到现有 `voice_profile.py` 的 system prompt **之前**，用 ``<memory>`` / ``</memory>`` 标签包起来
 - **用户可见、可覆盖**：memory 文件是明文 JSON，可以手工编辑；可以整个清空；可以置为"只读"
 
 ---
 
 ## 文件清单
 
-
-| 文件                      | 内容                                     |
-| ----------------------- | -------------------------------------- |
-| `README.md`             | 本文：scope / 非目标 / 全局约束                  |
-| `SCHEMA.md`             | 4 类事件的字段定义、示例、约束                       |
-| `STORAGE.md`            | 目录布局、原子写入、user_id 策略                   |
-| `LIFECYCLE.md`          | session 划分、summary、recent window、归档、老化 |
-| `PROMPT_INTEGRATION.md` | 注入预算、裁剪策略、如何嵌进现有 prompt                |
-| `OPEN_QUESTIONS.md`     | 明确列出暂未决的分歧点，供自评 / codex review         |
-
+| 文件 | 内容 |
+|---|---|
+| `README.md` | 本文：scope / 非目标 / 全局约束 |
+| `SCHEMA.md` | 4 类事件的字段定义、示例、约束 |
+| `STORAGE.md` | 目录布局、原子写入、user_id 策略 |
+| `LIFECYCLE.md` | session 划分、summary、recent window、归档、老化 |
+| `PROMPT_INTEGRATION.md` | 注入预算、裁剪策略、如何嵌进现有 prompt |
+| `OPEN_QUESTIONS.md` | 明确列出暂未决的分歧点，供自评 / codex review |
 
 ---
 
@@ -104,8 +101,9 @@ H1 memory **不碰** MotorBusArbiter。
 - 写入端：memory writer 是 **纯旁路**，不经过 8770 motor_bus，不参与硬件仲裁
 - 读取端：voice agent 启动时从文件读取，不走任何 HTTP
 - 失败降级：memory 目录缺失 / JSONL 损坏 → **静默忽略**，lelamp 行为退化成现在的无记忆版本（即当前 runtime-main 行为）
+- **反向独立**：session 开始不依赖 MotorBusServer 成功启动；arbiter bind retry 最终失败、`AnimationService.start()` 抛错时，memory 层照样记录（`meta.json.flags.motor_bus_enabled = false`）。见 `LIFECYCLE.md` §"Session 的定义"
 
-换句话说，**H1 不能把 H0 变不稳**。这是底线。
+换句话说，**H1 不能把 H0 变不稳，H0 也不能把 H1 变不记**。这是底线。
 
 ---
 

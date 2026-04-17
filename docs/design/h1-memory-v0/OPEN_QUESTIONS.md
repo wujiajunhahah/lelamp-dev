@@ -35,12 +35,13 @@
 
 **问题**：LLM 正在调用 `play_recording`，写了 `invoke`；进程被 kill 之前没走到 `result` → 孤儿 invoke。
 
-- 选项 A：reader 忽略孤儿 invoke（不进 prompt digest）
-- 选项 B：下一次 session 启动时 writer 回收，补一条 `result{ok=False, error="orphaned_by_session_exit"}`
+- 选项 A：reader 在构建 header 时忽略孤儿 invoke（不进 prompt digest）
+- 选项 B：**下一次 session 启动时 writer 自检阶段**回收，补一条 `result{ok=False, error="orphaned_by_session_exit"}`
 - 选项 C：不处理，答辩不讲
 
-**当前倾向**：**A**。B 需要 reader 改 writer 状态，违反"reader 纯读"契约；C 会让 fallback_rate 统计失真。
-**悬而未决**：v0 实现时要显式 test 这个场景。
+**当前倾向**：**A + B 组合**——reader 按 A 的规则读（只读就忽略孤儿），writer 按 B 的规则在启动自检里补 result。这样 reader 保持纯读，writer 保持 audit 完整。
+**与合同对齐**：此路径不违反 "reader 纯读"（见 `PROMPT_INTEGRATION.md` §"Reader 的副作用契约"），因为 B 是在 writer 自检阶段、flock 保护下完成。
+**悬而未决**：v0 实现时要显式 test 这两条路径。
 
 ---
 

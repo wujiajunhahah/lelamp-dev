@@ -4,9 +4,14 @@
 
 一个 session = **一次 lelamp agent 进程的活跃寿命**，而不是"一次对话"。
 
-- session 开始：`smooth_animation.py` 的 `entrypoint` 里，MotorBusServer 成功 `start()` 之后 1 步
+- session 开始：`smooth_animation.py` 的 `entrypoint` **进入后的第一步**，在任何硬件 / arbiter 初始化**之前**；此时 writer 立刻做 "index 自检"（见下文）并写 `sessions/*.meta.json`
 - session 结束：进程收到 `SIGTERM` / `SIGINT` / 正常退出时的 `atexit` 钩子
 - session 之间的间隔（lelamp 没在跑）**不算** session
+
+> **重要（与 H0 的解耦）**：session 开始 **不** 依赖 MotorBusServer 是否成功 `start()`。
+> 即使 arbiter bind retry 失败、串口被占、`AnimationService.start()` 抛错，session 仍然正常开始；
+> 这些硬件状态只影响 `meta.json` 里 `flags.motor_bus_enabled` 等字段，不影响 memory 层是否记录。
+> 这保证了 "记忆层与硬件仲裁层独立" 的合同（见 `README.md` §"与 H0 的关系"）。
 
 ### 为什么是"一次进程"而不是"一次对话"
 

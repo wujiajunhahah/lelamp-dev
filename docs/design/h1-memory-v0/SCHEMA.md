@@ -145,12 +145,13 @@ agent LLM 调用的 function tool（`express`、`play_recording`、`set_rgb_soli
 
 ## kind=`playback`
 
-dashboard 或 remote_control 触发的硬件播放行为。
+**dashboard 或 remote_control** 触发的硬件播放行为。**voice-agent 调 `play_recording` 等工具产生的硬件动作不写入本类事件**，由 `function_tool` 唯一承载（见下"去重契约"）。
 
 ### 产生条件
 
 - 在 `runtime_bridge.play / startup / shutdown_pose / set_light_solid / clear_light` 的**完成回调**里写入（成功 / 失败都写）
 - **不在 motor_bus 的 HTTP 层写**——motor_bus 是硬件 arbiter，写日志是上层的事
+- **不在 voice agent 的 function tool 路径写**——那条路径已经有 `function_tool` 的 invoke/result 对，重复记会让 `fallback_rate` 等统计失真
 
 ### payload
 
@@ -160,7 +161,7 @@ dashboard 或 remote_control 触发的硬件播放行为。
   "action": "play | startup | shutdown_pose | light_solid | light_clear",
   "recording_name": "curious",         
   "rgb": [255, 170, 70],               
-  "initiator": "dashboard | remote_control | voice_agent_tool",
+  "initiator": "dashboard | remote_control",
   "duration_ms": 2034,
   "ok": true,
   "error": null
@@ -170,8 +171,20 @@ dashboard 或 remote_control 触发的硬件播放行为。
 约束：
 
 - 根据 `action` 不同，`recording_name` / `rgb` 可选其一或都为 null
-- `initiator="voice_agent_tool"` 和 `function_tool.tool_name="play_recording"` 会形成一个因果链；v0 不主动建这个链，但两条事件的 `ts_ms` 差通常 < 100ms，事后可以在分析脚本里配对
+- `initiator` 枚举**仅** `dashboard | remote_control`。**不接受** `voice_agent_tool`
 - `duration_ms`：对 `play / startup` 是 `wait_until_playback_complete` 的真实耗时（H0.2 之后这个值是真的，不是 14ms race 假值）
+
+### 去重契约（voice agent 路径）
+
+| 触发路径 | 记录事件 |
+|---|---|
+| LLM 调 `play_recording("curious")` | `function_tool(invoke) + function_tool(result)`，**不**写 playback |
+| LLM 调 `set_rgb_solid(...)` | `function_tool(invoke) + function_tool(result)`，**不**写 playback |
+| AutoExpression 兜底调 `express("shy")` | `fallback_expression + function_tool(invoke) + function_tool(result)`，**不**写 playback |
+| Dashboard 按钮点"play curious" | `playback(initiator=dashboard)` |
+| `python -m lelamp.remote_control play curious` | `playback(initiator=remote_control)` |
+
+**原因**：voice_agent 的硬件动作一定伴随 LLM / AutoExpression 的 `function_tool` 事件；写两条是重复。dashboard / remote_control 的硬件动作**没有** function_tool 伴随，必须用 playback 保留审计。
 
 ---
 
@@ -190,15 +203,26 @@ v0 明确**不**接受下列字段，任何 PR 加入它们都应被拒：
 
 ---
 
-## 示例：完整的一轮对话产生的事件流
+## 示例 A：voice-agent 路径（3 条事件，无 playback）
 
-假设用户说"逗我笑一下"，模型回了个笑话并调用 `play_recording("happy_wiggle")`：
+用户说"逗我笑一下"，模型回了个笑话并调用 `play_recording("happy_wiggle")`：
 
 ```jsonl
 {"schema":"lelamp.memory.v0","event_id":"01JR5K001","ts_ms":1776438861533,"user_id":"default","session_id":"sess_2026-04-17_23-11-15","kind":"conversation","source":"voice_agent","payload":{"payload_version":1,"user_text":"逗我笑一下","assistant_text":"这盏台灯走进酒吧…","user_text_lang":"zh","assistant_style":"excited","turn_duration_ms":2100,"model_provider":"qwen","model_name":"qwen-omni-3.5"}}
 {"schema":"lelamp.memory.v0","event_id":"01JR5K002","ts_ms":1776438861620,"user_id":"default","session_id":"sess_2026-04-17_23-11-15","kind":"function_tool","source":"voice_agent","payload":{"payload_version":1,"invoke_id":"inv_42","phase":"invoke","tool_name":"play_recording","args":{"recording_name":"happy_wiggle"},"caller":"llm"}}
-{"schema":"lelamp.memory.v0","event_id":"01JR5K003","ts_ms":1776438863800,"user_id":"default","session_id":"sess_2026-04-17_23-11-15","kind":"playback","source":"voice_agent","payload":{"payload_version":1,"action":"play","recording_name":"happy_wiggle","rgb":null,"initiator":"voice_agent_tool","duration_ms":2180,"ok":true,"error":null}}
-{"schema":"lelamp.memory.v0","event_id":"01JR5K004","ts_ms":1776438863905,"user_id":"default","session_id":"sess_2026-04-17_23-11-15","kind":"function_tool","source":"voice_agent","payload":{"payload_version":1,"invoke_id":"inv_42","phase":"result","tool_name":"play_recording","args":{"recording_name":"happy_wiggle"},"caller":"llm","duration_ms":2285,"ok":true,"error":null}}
+{"schema":"lelamp.memory.v0","event_id":"01JR5K003","ts_ms":1776438863905,"user_id":"default","session_id":"sess_2026-04-17_23-11-15","kind":"function_tool","source":"voice_agent","payload":{"payload_version":1,"invoke_id":"inv_42","phase":"result","tool_name":"play_recording","args":{"recording_name":"happy_wiggle"},"caller":"llm","duration_ms":2285,"ok":true,"error":null}}
 ```
 
-这 4 条构成一个可审计的完整链：**说话 → 模型决策调工具 → 硬件真的动了 → 工具返回成功**。答辩的时候可以直接 `tail -n 4 conversation.jsonl | jq`。
+这 3 条是完整链：**说话 → 模型决策调工具 → 工具返回成功**。硬件是否真的动了、播放耗时多少，**由 `function_tool.result.duration_ms` 承载**（result 是在 `wait_until_playback_complete` 返回后写的，见 `LIFECYCLE.md`）。答辩时 `tail -n 3 events.jsonl | jq` 即可复现。
+
+## 示例 B：dashboard 路径（1 条 playback）
+
+用户在 dashboard 点了"play curious"按钮：
+
+```jsonl
+{"schema":"lelamp.memory.v0","event_id":"01JR5K010","ts_ms":1776438920100,"user_id":"default","session_id":"sess_2026-04-17_23-11-15","kind":"playback","source":"dashboard","payload":{"payload_version":1,"action":"play","recording_name":"curious","rgb":null,"initiator":"dashboard","duration_ms":2034,"ok":true,"error":null}}
+```
+
+单条 playback。**不伴随** conversation / function_tool —— dashboard 不走 LLM。
+
+这两类示例共同体现去重契约：**voice-agent 路径用 `function_tool`，dashboard / CLI 路径用 `playback`，不重叠。**
