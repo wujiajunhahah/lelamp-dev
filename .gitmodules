@@ -1,0 +1,4 @@
+[submodule "lelamp_runtime"]
+	path = lelamp_runtime
+	url = https://github.com/wujiajunhahah/lelamp-dev.git
+	branch = main

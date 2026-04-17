@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LeLamp Dev | Developer Docs</title>
+    <meta
+      name="description"
+      content="Developer documentation for the LeLamp Pi 5 + OpenClaw workspace."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="hero hero--compact">
+      <div class="hero__inner">
+        <p class="eyebrow">Developer Docs</p>
+        <h1>维护与扩展说明</h1>
+        <p class="lede">
+          这页面向维护这个仓库的人，重点解释脚本职责、版本策略、OpenClaw 边界和 GitHub Pages 结构。
+        </p>
+        <div class="hero__actions">
+          <a class="button button--primary" href="./index.html">返回主页</a>
+          <a class="button" href="https://github.com/wujiajunhahah/lelamp-dev/blob/main/DEVELOPMENT_GUIDE_PI5.md">查看 Markdown 版</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="card">
+        <h2>维护原则</h2>
+        <ul>
+          <li>默认只为 Pi 5 优化</li>
+          <li>默认只安全支持 ReSpeaker V2.0</li>
+          <li>OpenClaw 只做高层远控，不直接做底层校准</li>
+          <li>优先保持纯静态、无构建的 Pages 站点</li>
+        </ul>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h2>核心脚本</h2>
+          <ul>
+            <li><code>host_tools/pi5_zero_touch_seed.sh</code>: 空白卡 bootfs 种子入口</li>
+            <li><code>scripts/pi5_all_in_one.sh</code>: 总控入口</li>
+            <li><code>scripts/pi_setup_max.sh</code>: LeLamp runtime 与音频</li>
+            <li><code>scripts/openclaw_pi5_setup.sh</code>: OpenClaw 安装</li>
+            <li><code>scripts/pi5_post_reboot_finalize.sh</code>: 重启后收尾</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h2>运行时配置</h2>
+          <p>
+            所有环境变量通过
+            <a href="https://github.com/wujiajunhahah/lelamp-dev/blob/main/lelamp_runtime/lelamp/runtime_config.py">runtime_config.py</a>
+            统一读取。
+          </p>
+          <p>不要再把灯 ID、串口、LED 数量写死在主程序里。</p>
+        </article>
+
+        <article class="card">
+          <h2>OpenClaw 边界</h2>
+          <p>
+            OpenClaw 当前只应该调用
+            <code>lelamp.remote_control</code>
+            暴露的安全高层命令。
+          </p>
+          <p>不要把 `setup_motors`、`calibrate` 直接开放给它。</p>
+        </article>
+
+        <article class="card">
+          <h2>Pages 结构</h2>
+          <p>站点文件在 `site/`，部署工作流在 `.github/workflows/pages.yml`。</p>
+          <p>站点只做纯静态 HTML/CSS，不依赖框架。</p>
+        </article>
+      </section>
+
+      <section class="card">
+        <h2>自动检测策略</h2>
+        <p>
+          `lelamp_runtime/scripts/lelamp_doctor.sh`
+          是当前缺失项检测入口。它负责判断：
+        </p>
+        <ul>
+          <li>哪些基础命令已经安装</li>
+          <li>哪些 `MODEL_*`、`LIVEKIT_*`、`LELAMP_*` 键存在</li>
+          <li>音频和串口设备有没有出现</li>
+          <li>LeLamp 和 post-boot 服务状态</li>
+          <li>zero-touch bootstrap 服务和完成标记</li>
+          <li>OpenClaw skill 是否就位</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>推荐验证命令</h2>
+        <pre><code>bash -n host_tools/pi5_zero_touch_seed.sh
+bash -n lelamp_runtime/scripts/pi_setup_max.sh
+bash -n lelamp_runtime/scripts/openclaw_pi5_setup.sh
+bash -n lelamp_runtime/scripts/install_openclaw_skill.sh
+bash -n lelamp_runtime/scripts/pi5_all_in_one.sh
+bash -n lelamp_runtime/scripts/pi5_post_reboot_finalize.sh
+python -m compileall \
+  lelamp_runtime/lelamp/remote_control.py \
+  lelamp_runtime/lelamp/runtime_config.py \
+  lelamp_runtime/main.py \
+  lelamp_runtime/smooth_animation.py</code></pre>
+      </section>
+
+      <section class="card">
+        <h2>继续扩展时的顺序</h2>
+        <ol>
+          <li>先改脚本或配置</li>
+          <li>再更新 README</li>
+          <li>再更新 Pages</li>
+          <li>最后再更新中文说明文档</li>
+        </ol>
+      </section>
+    </main>
+  </body>
+  </html>
