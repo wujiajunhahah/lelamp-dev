@@ -664,30 +664,42 @@ def build_memory_header(
     if state.tier == "fallback":
         return _FALLBACK_UNAVAILABLE
 
-    sections = [
-        _section_profile_hint(state),
-        _section_session_summary_recent(state),
-        _section_style_tendency(state),
-        _section_recent_conversation(state),
-        _section_function_tool_digest(state),
-        _section_playback_digest(state),
+    sections: list[tuple[str, bool]] = [
+        (_section_profile_hint(state), False),
+        (_section_session_summary_recent(state), True),
+        (_section_style_tendency(state), False),
+        (_section_recent_conversation(state), False),
+        (_section_function_tool_digest(state), False),
+        (_section_playback_digest(state), False),
     ]
-    sections = [s for s in sections if s]
+    sections = [(body, can_truncate) for body, can_truncate in sections if body]
     if not sections:
         return _FALLBACK_UNAVAILABLE
 
     budget = _budget(budget_tokens)
-    # P0 always stays; drop sections from the bottom until we fit.
-    while len(sections) > 1 and sum(estimate_tokens(s) for s in sections) > budget:
+    # Drop lowest-priority sections first; if the best remaining
+    # section still overflows, truncate that section to fit.
+    while len(sections) > 1 and sum(estimate_tokens(body) for body, _ in sections) > budget:
         sections.pop()
-    # Last-ditch: sentence-truncate what's now at index 1 (the old P1).
-    if len(sections) >= 2:
-        used = sum(estimate_tokens(s) for s in sections)
-        if used > budget:
-            allowed = budget - estimate_tokens(sections[0])
-            if allowed > 0:
-                sections[1] = _truncate_by_sentence(sections[1], allowed)
-    body = "\n\n".join(sections)
+    used = sum(estimate_tokens(body) for body, _ in sections)
+    if used > budget and sections:
+        target_index = next(
+            (idx for idx, (_, can_truncate) in enumerate(sections) if can_truncate),
+            0,
+        )
+        other_tokens = sum(
+            estimate_tokens(body)
+            for idx, (body, _) in enumerate(sections)
+            if idx != target_index
+        )
+        allowed = max(0, budget - other_tokens)
+        target_body, can_truncate = sections[target_index]
+        sections[target_index] = (
+            _truncate_by_sentence(target_body, allowed),
+            can_truncate,
+        )
+        sections = [(body, can_truncate) for body, can_truncate in sections if body]
+    body = "\n\n".join(body for body, _ in sections)
     return _wrap(body, user_id=user_id, now=now)
 
 

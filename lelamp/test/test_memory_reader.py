@@ -201,6 +201,39 @@ class TestBudget:
         # Lowest-priority sections should have been dropped.
         assert "HARDWARE USAGE" not in trimmed
 
+    def test_budget_truncates_single_remaining_recap_when_profile_absent(self, tmp_path, monkeypatch):
+        user_dir = tmp_path / "mem" / "default"
+        user_dir.mkdir(parents=True)
+
+        monkeypatch.setattr(memreader, "user_memory_root", lambda user_id=None: user_dir)
+        monkeypatch.setattr(
+            memreader,
+            "_collect_state",
+            lambda _user_dir: memreader._ReaderState(
+                tier="normal",
+                profile={},
+                summaries=[{"session_id": "sess_2026-04-17_23-11-15"}],
+                recent_events=[],
+            ),
+        )
+        monkeypatch.setattr(memreader, "_wrap", lambda body, **_: body)
+        monkeypatch.setattr(memreader, "_section_profile_hint", lambda state: "")
+        monkeypatch.setattr(
+            memreader,
+            "_section_session_summary_recent",
+            lambda state: "很长的总结。 " * 80,
+        )
+        monkeypatch.setattr(memreader, "_section_style_tendency", lambda state: "")
+        monkeypatch.setattr(memreader, "_section_recent_conversation", lambda state: "")
+        monkeypatch.setattr(memreader, "_section_function_tool_digest", lambda state: "")
+        monkeypatch.setattr(memreader, "_section_playback_digest", lambda state: "")
+
+        budget_tokens = 24
+        body = build_memory_header(budget_tokens=budget_tokens)
+
+        assert body != "很长的总结。 " * 80
+        assert estimate_tokens(body) <= budget_tokens
+
     def test_env_budget_override(self, writer, user_dir, monkeypatch):
         handle = _full_agent_fixture(writer, _seed_agent_session(writer))
         _close_session(writer, handle)
