@@ -345,6 +345,61 @@ class DashboardRuntimeBridgeTests(unittest.TestCase):
             error=None,
         )
 
+    def test_startup_direct_path_does_not_double_record_when_remote_handler_already_logged(self) -> None:
+        settings = self._make_settings()
+        playback_events = []
+
+        def _remote_startup(args) -> int:
+            del args
+            runtime_bridge_mod.record_standalone_playback(
+                source="dashboard",
+                initiator="dashboard",
+                action="startup",
+                recording_name="wake_up",
+                rgb=None,
+                duration_ms=2034,
+                ok=True,
+                error=None,
+            )
+            return 0
+
+        remote_module = SimpleNamespace(
+            HANDLES_PLAYBACK_RECORDING=True,
+            _handle_startup=_remote_startup,
+            DEFAULT_STARTUP_SETTLE_FRAMES=18,
+            DEFAULT_STARTUP_HOLD_FRAMES=10,
+            DEFAULT_STARTUP_FPS=15,
+            DEFAULT_WAKE_FPS=30,
+            DEFAULT_POST_WAKE_HOLD_SECONDS=0.8,
+        )
+
+        with patch.object(
+            runtime_bridge_mod,
+            "record_standalone_playback",
+            side_effect=lambda **kwargs: playback_events.append(kwargs),
+        ):
+            bridge = DashboardRuntimeBridge(
+                settings,
+                animation_factory=FakeAnimationService,
+                rgb_factory=FakeRGBService,
+                remote_module=remote_module,
+            )
+            result = bridge.startup()
+
+        self.assertTrue(result.ok)
+        self.assertEqual(playback_events, [
+            {
+                "source": "dashboard",
+                "initiator": "dashboard",
+                "action": "startup",
+                "recording_name": "wake_up",
+                "rgb": None,
+                "duration_ms": 2034,
+                "ok": True,
+                "error": None,
+            }
+        ])
+
     def test_set_light_solid_dispatches_rgb_event_and_keeps_state(self) -> None:
         settings = self._make_settings()
 
@@ -475,6 +530,63 @@ class DashboardRuntimeBridgeTests(unittest.TestCase):
             ok=True,
             error=None,
         )
+
+    def test_shutdown_direct_path_does_not_double_record_when_remote_handler_already_logged(self) -> None:
+        settings = self._make_settings()
+        playback_events = []
+
+        def _remote_shutdown(args) -> int:
+            del args
+            runtime_bridge_mod.record_standalone_playback(
+                source="dashboard",
+                initiator="dashboard",
+                action="shutdown_pose",
+                recording_name="power_off",
+                rgb=None,
+                duration_ms=1550,
+                ok=True,
+                error=None,
+            )
+            return 0
+
+        remote_module = SimpleNamespace(
+            HANDLES_PLAYBACK_RECORDING=True,
+            _handle_shutdown=_remote_shutdown,
+            DEFAULT_SHUTDOWN_PREPARE_FRACTION=0.22,
+            DEFAULT_SHUTDOWN_PREPARE_FRAMES=10,
+            DEFAULT_SHUTDOWN_SETTLE_FRAMES=16,
+            DEFAULT_SHUTDOWN_HOLD_FRAMES=8,
+            DEFAULT_SHUTDOWN_FPS=12,
+            DEFAULT_SHUTDOWN_FINAL_HOLD_SECONDS=1.0,
+            DEFAULT_RELEASE_PAUSE_SECONDS=0.8,
+        )
+
+        with patch.object(
+            runtime_bridge_mod,
+            "record_standalone_playback",
+            side_effect=lambda **kwargs: playback_events.append(kwargs),
+        ):
+            bridge = DashboardRuntimeBridge(
+                settings,
+                animation_factory=FakeAnimationService,
+                rgb_factory=FakeRGBService,
+                remote_module=remote_module,
+            )
+            result = bridge.shutdown_pose()
+
+        self.assertTrue(result.ok)
+        self.assertEqual(playback_events, [
+            {
+                "source": "dashboard",
+                "initiator": "dashboard",
+                "action": "shutdown_pose",
+                "recording_name": "power_off",
+                "rgb": None,
+                "duration_ms": 1550,
+                "ok": True,
+                "error": None,
+            }
+        ])
 
     def test_shutdown_pose_via_motor_bus_records_shutdown_pose_action(self) -> None:
         settings = self._make_settings()

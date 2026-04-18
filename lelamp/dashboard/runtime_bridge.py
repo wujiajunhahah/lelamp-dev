@@ -135,6 +135,9 @@ class DashboardRuntimeBridge:
             self.remote_module._handle_startup,
             playback_action="startup",
             playback_recording=self.settings.startup_recording,
+            handler_records_playback=bool(
+                getattr(self.remote_module, "HANDLES_PLAYBACK_RECORDING", False)
+            ),
             recording=self.settings.startup_recording,
             home_recording=self.settings.home_recording,
             settle_frames=self.remote_module.DEFAULT_STARTUP_SETTLE_FRAMES,
@@ -229,6 +232,9 @@ class DashboardRuntimeBridge:
             self.remote_module._handle_shutdown,
             playback_action="shutdown_pose",
             playback_recording="power_off",
+            handler_records_playback=bool(
+                getattr(self.remote_module, "HANDLES_PLAYBACK_RECORDING", False)
+            ),
             recording="power_off",
             prepare_fraction=self.remote_module.DEFAULT_SHUTDOWN_PREPARE_FRACTION,
             prepare_frames=self.remote_module.DEFAULT_SHUTDOWN_PREPARE_FRAMES,
@@ -335,6 +341,7 @@ class DashboardRuntimeBridge:
         *,
         playback_action: str | None = None,
         playback_recording: str | None = None,
+        handler_records_playback: bool = False,
         **overrides: Any,
     ) -> DashboardActionResult:
         payload = {
@@ -356,7 +363,7 @@ class DashboardRuntimeBridge:
         try:
             exit_code = handler(args)
         except Exception as exc:
-            if playback_action is not None:
+            if playback_action is not None and not handler_records_playback:
                 self._record_playback(
                     action=playback_action,
                     recording_name=playback_recording,
@@ -371,7 +378,7 @@ class DashboardRuntimeBridge:
                 detail=str(exc),
             )
         if exit_code != 0:
-            if playback_action is not None:
+            if playback_action is not None and not handler_records_playback:
                 self._record_playback(
                     action=playback_action,
                     recording_name=playback_recording,
@@ -386,7 +393,7 @@ class DashboardRuntimeBridge:
                 detail=str(exit_code),
             )
 
-        if playback_action is not None:
+        if playback_action is not None and not handler_records_playback:
             self._record_playback(
                 action=playback_action,
                 recording_name=playback_recording,
