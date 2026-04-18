@@ -250,7 +250,24 @@ def _message_text(item: Any) -> str:
         return text.strip()
     content = getattr(item, "content", None)
     if isinstance(content, list):
-        return " ".join(str(part).strip() for part in content if isinstance(part, str)).strip()
+        parts = [_content_part_text(part) for part in content]
+        return " ".join(part for part in parts if part).strip()
+    return ""
+
+
+def _content_part_text(part: Any) -> str:
+    if isinstance(part, str):
+        return part.strip()
+    if isinstance(part, dict):
+        for key in ("text", "transcript"):
+            value = part.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+    for attr in ("text_content", "text", "transcript"):
+        value = getattr(part, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return ""
 
 

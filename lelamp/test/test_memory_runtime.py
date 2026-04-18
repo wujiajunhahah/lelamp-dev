@@ -188,6 +188,78 @@ def test_agent_memory_runtime_installs_session_listeners_and_records_events():
     )
 
 
+def test_agent_memory_runtime_extracts_assistant_text_from_content_objects():
+    from lelamp.memory.runtime import AgentMemoryRuntime
+
+    recorded_calls = []
+
+    class FakeWriter:
+        def write_conversation(self, **kwargs):
+            recorded_calls.append(("conversation", kwargs))
+
+        def write_function_tool(self, **kwargs):
+            recorded_calls.append(("function_tool", kwargs))
+
+    class FakeSession:
+        def __init__(self):
+            self.callbacks = {}
+
+        def on(self, event, callback=None):
+            self.callbacks[event] = callback
+            return callback
+
+    runtime = AgentMemoryRuntime(
+        enabled=True,
+        writer=FakeWriter(),
+        session_handle=SimpleNamespace(session_id="sess_2026-04-18_12-00-00"),
+    )
+    session = FakeSession()
+
+    runtime.install_session_listeners(
+        session,
+        model_provider="qwen",
+        model_name="qwen3.5-omni-plus-realtime",
+    )
+
+    session.callbacks["user_input_transcribed"](
+        SimpleNamespace(
+            transcript="你好呀",
+            is_final=True,
+            created_at=1713412800.1,
+        )
+    )
+    session.callbacks["conversation_item_added"](
+        SimpleNamespace(
+            item=SimpleNamespace(
+                role="assistant",
+                content=[
+                    SimpleNamespace(type="text", text="我在呢。"),
+                    SimpleNamespace(type="audio", transcript=""),
+                ],
+            ),
+            created_at=1713412800.4,
+        )
+    )
+
+    assert recorded_calls == [
+        (
+            "conversation",
+            {
+                "session_id": "sess_2026-04-18_12-00-00",
+                "source": "voice_agent",
+                "user_text": "你好呀",
+                "assistant_text": "我在呢。",
+                "user_text_lang": None,
+                "assistant_style": None,
+                "turn_duration_ms": 300,
+                "model_provider": "qwen",
+                "model_name": "qwen3.5-omni-plus-realtime",
+                "ts_ms": 1713412800400,
+            },
+        )
+    ]
+
+
 def test_agent_memory_runtime_records_auto_expression_fallback():
     from lelamp.memory.runtime import AgentMemoryRuntime
 
