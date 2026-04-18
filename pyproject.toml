@@ -33,3 +33,8 @@ hardware = [
     "adafruit-circuitpython-neopixel",
     "rpi-ws281x",
 ]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:lelamp main.py is deprecated; use smooth_animation.py.*:DeprecationWarning",
+]
