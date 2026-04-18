@@ -72,6 +72,7 @@ class DashboardRuntimeBridge:
         return service.get_available_recordings()
 
     def startup(self) -> DashboardActionResult:
+        started_at = time.monotonic()
         # When the voice agent is running AND its motor service is live we
         # short-circuit to a proxy dispatch, because re-running the staged
         # startup via remote_control would fight the agent for the serial
@@ -87,24 +88,53 @@ class DashboardRuntimeBridge:
             try:
                 service.dispatch("startup", self.settings.startup_recording)
                 if not service.wait_until_playback_complete(timeout=120.0):
-                    return DashboardActionResult(
+                    result = DashboardActionResult(
                         False,
                         "Timed out waiting for startup to finish",
                         detail=self.settings.startup_recording,
                     )
+                    self._record_playback(
+                        action="startup",
+                        recording_name=self.settings.startup_recording,
+                        rgb=None,
+                        duration_ms=_elapsed_ms(started_at),
+                        ok=False,
+                        error=result.message,
+                    )
+                    return result
             except Exception as exc:
-                return DashboardActionResult(
+                result = DashboardActionResult(
                     False,
                     "Failed to replay startup via motor bus",
                     detail=str(exc),
                 )
-            return DashboardActionResult(
+                self._record_playback(
+                    action="startup",
+                    recording_name=self.settings.startup_recording,
+                    rgb=None,
+                    duration_ms=_elapsed_ms(started_at),
+                    ok=False,
+                    error=result.detail,
+                )
+                return result
+            result = DashboardActionResult(
                 True,
                 "Re-dispatched startup via motor bus",
                 detail=self.settings.startup_recording,
             )
+            self._record_playback(
+                action="startup",
+                recording_name=self.settings.startup_recording,
+                rgb=None,
+                duration_ms=_elapsed_ms(started_at),
+                ok=True,
+                error=None,
+            )
+            return result
         return self._run_remote(
             self.remote_module._handle_startup,
+            playback_action="startup",
+            playback_recording=self.settings.startup_recording,
             recording=self.settings.startup_recording,
             home_recording=self.settings.home_recording,
             settle_frames=self.remote_module.DEFAULT_STARTUP_SETTLE_FRAMES,
@@ -114,7 +144,7 @@ class DashboardRuntimeBridge:
             post_wake_hold=self.remote_module.DEFAULT_POST_WAKE_HOLD_SECONDS,
         )
 
-    def play(self, recording_name: str) -> DashboardActionResult:
+    def play(self, recording_name: str, *, playback_action: str = "play") -> DashboardActionResult:
         started = False
         started_at = time.monotonic()
         try:
@@ -127,7 +157,7 @@ class DashboardRuntimeBridge:
                     detail=recording_name,
                 )
                 self._record_playback(
-                    action="play",
+                    action=playback_action,
                     recording_name=recording_name,
                     rgb=None,
                     duration_ms=None,
@@ -146,7 +176,7 @@ class DashboardRuntimeBridge:
                     detail=recording_name,
                 )
                 self._record_playback(
-                    action="play",
+                    action=playback_action,
                     recording_name=recording_name,
                     rgb=None,
                     duration_ms=_elapsed_ms(started_at),
@@ -161,7 +191,7 @@ class DashboardRuntimeBridge:
                 detail=str(exc),
             )
             self._record_playback(
-                action="play",
+                action=playback_action,
                 recording_name=recording_name,
                 rgb=None,
                 duration_ms=_elapsed_ms(started_at),
@@ -175,7 +205,7 @@ class DashboardRuntimeBridge:
 
         result = DashboardActionResult(True, "Finished playing recording", detail=recording_name)
         self._record_playback(
-            action="play",
+            action=playback_action,
             recording_name=recording_name,
             rgb=None,
             duration_ms=_elapsed_ms(started_at),
@@ -194,9 +224,11 @@ class DashboardRuntimeBridge:
         # limitations). When motor_ok is False we fall through to the staged
         # shutdown; the port is unlikely to be held in that case.
         if current_sentinel(require=REQUIRE_MOTOR) is not None:
-            return self.play("power_off")
+            return self.play("power_off", playback_action="shutdown_pose")
         return self._run_remote(
             self.remote_module._handle_shutdown,
+            playback_action="shutdown_pose",
+            playback_recording="power_off",
             recording="power_off",
             prepare_fraction=self.remote_module.DEFAULT_SHUTDOWN_PREPARE_FRACTION,
             prepare_frames=self.remote_module.DEFAULT_SHUTDOWN_PREPARE_FRAMES,
@@ -297,37 +329,72 @@ class DashboardRuntimeBridge:
         )
         return result
 
-    def _run_remote(self, handler, **overrides: Any) -> DashboardActionResult:
-        args = SimpleNamespace(
-            id=self.settings.lamp_id,
-            port=self.settings.port,
-            fps=self.settings.fps,
-            enable_rgb=self.settings.enable_rgb,
-            led_count=self.settings.led_count,
-            led_pin=self.settings.led_pin,
-            led_freq_hz=self.settings.led_freq_hz,
-            led_dma=self.settings.led_dma,
-            led_brightness=self.settings.led_brightness,
-            led_invert=self.settings.led_invert,
-            led_channel=self.settings.led_channel,
-            **overrides,
-        )
+    def _run_remote(
+        self,
+        handler,
+        *,
+        playback_action: str | None = None,
+        playback_recording: str | None = None,
+        **overrides: Any,
+    ) -> DashboardActionResult:
+        payload = {
+            "id": self.settings.lamp_id,
+            "port": self.settings.port,
+            "fps": self.settings.fps,
+            "enable_rgb": self.settings.enable_rgb,
+            "led_count": self.settings.led_count,
+            "led_pin": self.settings.led_pin,
+            "led_freq_hz": self.settings.led_freq_hz,
+            "led_dma": self.settings.led_dma,
+            "led_brightness": self.settings.led_brightness,
+            "led_invert": self.settings.led_invert,
+            "led_channel": self.settings.led_channel,
+        }
+        payload.update(overrides)
+        args = SimpleNamespace(**payload)
 
         try:
             exit_code = handler(args)
         except Exception as exc:
+            if playback_action is not None:
+                self._record_playback(
+                    action=playback_action,
+                    recording_name=playback_recording,
+                    rgb=None,
+                    duration_ms=None,
+                    ok=False,
+                    error=str(exc),
+                )
             return DashboardActionResult(
                 False,
                 "Runtime action failed",
                 detail=str(exc),
             )
         if exit_code != 0:
+            if playback_action is not None:
+                self._record_playback(
+                    action=playback_action,
+                    recording_name=playback_recording,
+                    rgb=None,
+                    duration_ms=None,
+                    ok=False,
+                    error=str(exit_code),
+                )
             return DashboardActionResult(
                 False,
                 "Runtime action failed",
                 detail=str(exit_code),
             )
 
+        if playback_action is not None:
+            self._record_playback(
+                action=playback_action,
+                recording_name=playback_recording,
+                rgb=None,
+                duration_ms=None,
+                ok=True,
+                error=None,
+            )
         return DashboardActionResult(True, "Runtime action completed")
 
     def _build_animation_service(self):

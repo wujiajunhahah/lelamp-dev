@@ -320,6 +320,8 @@ def _handle_sync_pose_recordings(args) -> int:
 
 
 def _handle_startup(args) -> int:
+    startup_recording = args.recording
+    started_at = time.monotonic()
     # Only block direct-hardware startup when the agent actually owns the
     # serial port (motor_ok == True). If the agent is alive but its
     # AnimationService never came up, we let the caller try a direct
@@ -331,11 +333,20 @@ def _handle_startup(args) -> int:
             "Use the dashboard 'startup' action (routes via motor bus) or "
             "stop the agent first."
         )
+        record_standalone_playback(
+            source="remote_control",
+            initiator="remote_control",
+            action="startup",
+            recording_name=startup_recording,
+            rgb=None,
+            duration_ms=None,
+            ok=False,
+            error="Voice agent is running and already owns the serial port",
+        )
         return 2
 
     from .follower import LeLampFollower, LeLampFollowerConfig
 
-    startup_recording = args.recording
     home_pose = _load_first_pose(args.home_recording)
     wake_up_actions = _load_recording_actions(startup_recording)
 
@@ -375,17 +386,40 @@ def _handle_startup(args) -> int:
                 time.sleep(1.0 / args.wake_fps)
 
         time.sleep(args.post_wake_hold)
+    except Exception as exc:
+        record_standalone_playback(
+            source="remote_control",
+            initiator="remote_control",
+            action="startup",
+            recording_name=startup_recording,
+            rgb=None,
+            duration_ms=_elapsed_ms(started_at),
+            ok=False,
+            error=str(exc),
+        )
+        raise
     finally:
         if robot.is_connected:
             robot.disconnect()
         if rgb_service is not None:
             rgb_service.stop()
 
+    record_standalone_playback(
+        source="remote_control",
+        initiator="remote_control",
+        action="startup",
+        recording_name=startup_recording,
+        rgb=None,
+        duration_ms=_elapsed_ms(started_at),
+        ok=True,
+        error=None,
+    )
     print(f"Finished startup choreography: {startup_recording}")
     return 0
 
 
 def _handle_shutdown(args) -> int:
+    started_at = time.monotonic()
     # Same motor-domain rule as _handle_startup: only refuse when the agent's
     # motor path is actually live. motor_ok=False means the agent never
     # acquired the bus, so direct torque-release can still run.
@@ -396,6 +430,16 @@ def _handle_shutdown(args) -> int:
             "remote_control. Stop the agent first, or use the dashboard "
             "'shutdown_pose' action (plays power_off via motor bus but "
             "keeps torque enabled)."
+        )
+        record_standalone_playback(
+            source="remote_control",
+            initiator="remote_control",
+            action="shutdown_pose",
+            recording_name=args.recording,
+            rgb=None,
+            duration_ms=None,
+            ok=False,
+            error="Voice agent is running and already owns the serial port",
         )
         return 2
 
@@ -437,12 +481,34 @@ def _handle_shutdown(args) -> int:
 
         if rgb_service is not None and not args.keep_led_on:
             rgb_service.clear()
+    except Exception as exc:
+        record_standalone_playback(
+            source="remote_control",
+            initiator="remote_control",
+            action="shutdown_pose",
+            recording_name=args.recording,
+            rgb=None,
+            duration_ms=_elapsed_ms(started_at),
+            ok=False,
+            error=str(exc),
+        )
+        raise
     finally:
         if robot.bus.is_connected:
             robot.bus.disconnect(disable_torque=False)
         if rgb_service is not None:
             rgb_service.stop()
 
+    record_standalone_playback(
+        source="remote_control",
+        initiator="remote_control",
+        action="shutdown_pose",
+        recording_name=args.recording,
+        rgb=None,
+        duration_ms=_elapsed_ms(started_at),
+        ok=True,
+        error=None,
+    )
     print(f"Finished shutdown choreography: {args.recording}")
     return 0
 
