@@ -92,6 +92,23 @@ class DashboardRuntimeBridgeTests(unittest.TestCase):
         FakeRGBService.raise_on_clear = None
         ExplodingFactory.called = False
         ExplodingAnimationFactory.called = False
+        self._animation_proxy_patcher = patch.object(
+            runtime_bridge_mod,
+            "_build_animation_service_with_proxy",
+            side_effect=lambda fallback_factory, **kwargs: fallback_factory(),
+        )
+        self._rgb_proxy_patcher = patch.object(
+            runtime_bridge_mod,
+            "_build_rgb_service_with_proxy",
+            side_effect=lambda fallback_factory, **kwargs: fallback_factory(),
+        )
+        self._sentinel_patcher = patch.object(runtime_bridge_mod, "current_sentinel", return_value=None)
+        self._animation_proxy_patcher.start()
+        self._rgb_proxy_patcher.start()
+        self._sentinel_patcher.start()
+        self.addCleanup(self._animation_proxy_patcher.stop)
+        self.addCleanup(self._rgb_proxy_patcher.stop)
+        self.addCleanup(self._sentinel_patcher.stop)
 
     @staticmethod
     def _make_settings(enable_rgb: bool = True) -> SimpleNamespace:
@@ -116,20 +133,38 @@ class DashboardRuntimeBridgeTests(unittest.TestCase):
     def test_play_uses_home_recording_as_idle_target(self) -> None:
         settings = self._make_settings()
 
-        bridge = DashboardRuntimeBridge(
-            settings,
-            animation_factory=FakeAnimationService,
-            rgb_factory=FakeRGBService,
-            remote_module=SimpleNamespace(),
-        )
+        with patch.object(
+            runtime_bridge_mod,
+            "record_standalone_playback",
+        ) as record_playback, patch.object(
+            runtime_bridge_mod,
+            "_elapsed_ms",
+            return_value=2034,
+        ):
+            bridge = DashboardRuntimeBridge(
+                settings,
+                animation_factory=FakeAnimationService,
+                rgb_factory=FakeRGBService,
+                remote_module=SimpleNamespace(),
+            )
 
-        result = bridge.play("curious")
+            result = bridge.play("curious")
 
         service = FakeAnimationService.instances[-1]
         self.assertTrue(result.ok)
         self.assertEqual(service.kwargs["idle_recording"], "home_safe")
         self.assertEqual(service.kwargs["home_recording"], "home_safe")
         self.assertEqual(service.dispatched, [("play", "curious")])
+        record_playback.assert_called_once_with(
+            source="dashboard",
+            initiator="dashboard",
+            action="play",
+            recording_name="curious",
+            rgb=None,
+            duration_ms=2034,
+            ok=True,
+            error=None,
+        )
 
     def test_play_missing_recording_fast_fails_without_dispatch(self) -> None:
         settings = self._make_settings()
@@ -259,17 +294,31 @@ class DashboardRuntimeBridgeTests(unittest.TestCase):
     def test_set_light_solid_dispatches_rgb_event_and_keeps_state(self) -> None:
         settings = self._make_settings()
 
-        bridge = DashboardRuntimeBridge(
-            settings,
-            animation_factory=FakeAnimationService,
-            rgb_factory=FakeRGBService,
-            remote_module=SimpleNamespace(),
-        )
+        with patch.object(
+            runtime_bridge_mod,
+            "record_standalone_playback",
+        ) as record_playback:
+            bridge = DashboardRuntimeBridge(
+                settings,
+                animation_factory=FakeAnimationService,
+                rgb_factory=FakeRGBService,
+                remote_module=SimpleNamespace(),
+            )
 
-        result = bridge.set_light_solid((255, 170, 70))
+            result = bridge.set_light_solid((255, 170, 70))
 
         self.assertTrue(result.ok)
         self.assertEqual(FakeRGBService.instances[-1].actions, [("solid", (255, 170, 70))])
+        record_playback.assert_called_once_with(
+            source="dashboard",
+            initiator="dashboard",
+            action="light_solid",
+            recording_name=None,
+            rgb=(255, 170, 70),
+            duration_ms=None,
+            ok=True,
+            error=None,
+        )
 
     def test_set_light_solid_returns_failed_result_when_rgb_disabled(self) -> None:
         settings = self._make_settings(enable_rgb=False)
@@ -307,18 +356,32 @@ class DashboardRuntimeBridgeTests(unittest.TestCase):
         settings = self._make_settings(enable_rgb=True)
         FakeRGBService.raise_on_clear = RuntimeError("device missing")
 
-        bridge = DashboardRuntimeBridge(
-            settings,
-            animation_factory=FakeAnimationService,
-            rgb_factory=FakeRGBService,
-            remote_module=SimpleNamespace(),
-        )
+        with patch.object(
+            runtime_bridge_mod,
+            "record_standalone_playback",
+        ) as record_playback:
+            bridge = DashboardRuntimeBridge(
+                settings,
+                animation_factory=FakeAnimationService,
+                rgb_factory=FakeRGBService,
+                remote_module=SimpleNamespace(),
+            )
 
-        result = bridge.clear_light()
+            result = bridge.clear_light()
 
         self.assertFalse(result.ok)
         self.assertIn("failed", result.message.lower())
         self.assertIn("device missing", result.detail)
+        record_playback.assert_called_once_with(
+            source="dashboard",
+            initiator="dashboard",
+            action="light_clear",
+            recording_name=None,
+            rgb=None,
+            duration_ms=None,
+            ok=False,
+            error="device missing",
+        )
 
 
 if __name__ == "__main__":

@@ -275,11 +275,17 @@ async def entrypoint(ctx: agents.JobContext):
     memory_runtime = bootstrap_agent_runtime(settings)
     agent = LeLamp(settings=settings)
     if hasattr(agent, "animation_service") and hasattr(agent, "settings"):
+        fallback_callback = getattr(
+            memory_runtime,
+            "note_auto_expression_fallback",
+            None,
+        )
         agent.auto_expression_controller = AutoExpressionController(
             animation_service=agent.animation_service,
             get_animation_service_error=lambda: agent.animation_service_error,
             rgb_service=agent.rgb_service,
             led_count=agent.settings.led_count,
+            on_fallback_expression=fallback_callback,
         )
         agent.auto_expression_controller.start()
 
@@ -352,6 +358,13 @@ async def entrypoint(ctx: agents.JobContext):
         session_kwargs["turn_detection"] = "manual"
 
     session = AgentSession(**session_kwargs)
+    install_session_listeners = getattr(memory_runtime, "install_session_listeners", None)
+    if callable(install_session_listeners):
+        install_session_listeners(
+            session,
+            model_provider=getattr(agent.settings, "model_provider", None),
+            model_name=getattr(agent.settings, "model_name", None),
+        )
 
     try:
         await session.start(

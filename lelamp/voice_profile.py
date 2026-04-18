@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from lelamp.memory import build_memory_header
 from lelamp.runtime_config import RuntimeSettings
 
 
@@ -192,7 +193,7 @@ def _en_rules_block() -> str:
 
 def build_agent_instructions(settings: RuntimeSettings) -> str:
     if _prefers_chinese(settings):
-        return "\n\n".join(
+        prompt = "\n\n".join(
             (
                 _zh_personality_block() + _RECORDINGS,
                 _zh_expression_block(),
@@ -202,8 +203,9 @@ def build_agent_instructions(settings: RuntimeSettings) -> str:
                 _zh_rules_block(),
             )
         )
+        return _prepend_memory_header(prompt)
 
-    return "\n\n".join(
+    prompt = "\n\n".join(
         (
             _en_personality_block() + _RECORDINGS,
             _en_expression_block(),
@@ -213,6 +215,7 @@ def build_agent_instructions(settings: RuntimeSettings) -> str:
             _en_rules_block(),
         )
     )
+    return _prepend_memory_header(prompt)
 
 
 def build_startup_reply_instructions(settings: RuntimeSettings) -> str:
@@ -229,3 +232,10 @@ def build_startup_reply_instructions(settings: RuntimeSettings) -> str:
         f"Prefer express(\"greeting\") or express(\"happy\") for the visible reaction. "
         f"No self-introductions like 'Hello I am LeLamp'."
     )
+
+
+def _prepend_memory_header(prompt: str) -> str:
+    header = build_memory_header()
+    if not header:
+        return prompt
+    return f"{header}\n\n{prompt}"

@@ -11,10 +11,12 @@ behaviour so calibration / no-agent workflows keep working.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Callable
 
+from lelamp.memory.runtime import record_standalone_playback
 from lelamp.motor_bus.client import (
     REQUIRE_MOTOR,
     build_animation_service as _build_animation_service_with_proxy,
@@ -28,6 +30,10 @@ class DashboardActionResult:
     ok: bool
     message: str
     detail: str | None = None
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return int((time.monotonic() - started_at) * 1000)
 
 
 def _default_animation_factory(**kwargs):
@@ -110,36 +116,73 @@ class DashboardRuntimeBridge:
 
     def play(self, recording_name: str) -> DashboardActionResult:
         started = False
+        started_at = time.monotonic()
         try:
             service = self._build_animation_service()
             recordings = set(service.get_available_recordings())
             if recording_name not in recordings:
-                return DashboardActionResult(
+                result = DashboardActionResult(
                     False,
                     "Recording not found",
                     detail=recording_name,
                 )
+                self._record_playback(
+                    action="play",
+                    recording_name=recording_name,
+                    rgb=None,
+                    duration_ms=None,
+                    ok=False,
+                    error=result.detail,
+                )
+                return result
 
             service.start()
             started = True
             service.dispatch("play", recording_name)
             if not service.wait_until_playback_complete(timeout=120.0):
-                return DashboardActionResult(
+                result = DashboardActionResult(
                     False,
                     "Timed out waiting for recording to finish",
                     detail=recording_name,
                 )
+                self._record_playback(
+                    action="play",
+                    recording_name=recording_name,
+                    rgb=None,
+                    duration_ms=_elapsed_ms(started_at),
+                    ok=False,
+                    error=result.message,
+                )
+                return result
         except Exception as exc:
-            return DashboardActionResult(
+            result = DashboardActionResult(
                 False,
                 "Failed to play recording",
                 detail=str(exc),
             )
+            self._record_playback(
+                action="play",
+                recording_name=recording_name,
+                rgb=None,
+                duration_ms=_elapsed_ms(started_at),
+                ok=False,
+                error=result.detail,
+            )
+            return result
         finally:
             if started:
                 service.stop()
 
-        return DashboardActionResult(True, "Finished playing recording", detail=recording_name)
+        result = DashboardActionResult(True, "Finished playing recording", detail=recording_name)
+        self._record_playback(
+            action="play",
+            recording_name=recording_name,
+            rgb=None,
+            duration_ms=_elapsed_ms(started_at),
+            ok=True,
+            error=None,
+        )
+        return result
 
     def shutdown_pose(self) -> DashboardActionResult:
         # remote_control._handle_shutdown releases torque by writing
@@ -170,35 +213,89 @@ class DashboardRuntimeBridge:
 
     def set_light_solid(self, rgb: tuple[int, int, int]) -> DashboardActionResult:
         if not self.settings.enable_rgb:
-            return DashboardActionResult(False, "RGB is disabled via LELAMP_ENABLE_RGB")
+            result = DashboardActionResult(False, "RGB is disabled via LELAMP_ENABLE_RGB")
+            self._record_playback(
+                action="light_solid",
+                recording_name=None,
+                rgb=rgb,
+                duration_ms=None,
+                ok=False,
+                error=result.message,
+            )
+            return result
 
         try:
             service = self._build_rgb_service()
             service.handle_event("solid", rgb)
         except Exception as exc:
-            return DashboardActionResult(
+            result = DashboardActionResult(
                 False,
                 "Failed to set RGB solid color",
                 detail=str(exc),
             )
+            self._record_playback(
+                action="light_solid",
+                recording_name=None,
+                rgb=rgb,
+                duration_ms=None,
+                ok=False,
+                error=result.detail,
+            )
+            return result
 
-        return DashboardActionResult(True, "Set RGB solid color", detail=str(rgb))
+        result = DashboardActionResult(True, "Set RGB solid color", detail=str(rgb))
+        self._record_playback(
+            action="light_solid",
+            recording_name=None,
+            rgb=rgb,
+            duration_ms=None,
+            ok=True,
+            error=None,
+        )
+        return result
 
     def clear_light(self) -> DashboardActionResult:
         if not self.settings.enable_rgb:
-            return DashboardActionResult(False, "RGB is disabled via LELAMP_ENABLE_RGB")
+            result = DashboardActionResult(False, "RGB is disabled via LELAMP_ENABLE_RGB")
+            self._record_playback(
+                action="light_clear",
+                recording_name=None,
+                rgb=None,
+                duration_ms=None,
+                ok=False,
+                error=result.message,
+            )
+            return result
 
         try:
             service = self._build_rgb_service()
             service.clear()
         except Exception as exc:
-            return DashboardActionResult(
+            result = DashboardActionResult(
                 False,
                 "Failed to clear RGB LEDs",
                 detail=str(exc),
             )
+            self._record_playback(
+                action="light_clear",
+                recording_name=None,
+                rgb=None,
+                duration_ms=None,
+                ok=False,
+                error=result.detail,
+            )
+            return result
 
-        return DashboardActionResult(True, "Cleared RGB LEDs")
+        result = DashboardActionResult(True, "Cleared RGB LEDs")
+        self._record_playback(
+            action="light_clear",
+            recording_name=None,
+            rgb=None,
+            duration_ms=None,
+            ok=True,
+            error=None,
+        )
+        return result
 
     def _run_remote(self, handler, **overrides: Any) -> DashboardActionResult:
         args = SimpleNamespace(
@@ -260,3 +357,24 @@ class DashboardRuntimeBridge:
             )
 
         return _build_rgb_service_with_proxy(_fallback)
+
+    def _record_playback(
+        self,
+        *,
+        action: str,
+        recording_name: str | None,
+        rgb: tuple[int, int, int] | None,
+        duration_ms: int | None,
+        ok: bool,
+        error: str | None,
+    ) -> None:
+        record_standalone_playback(
+            source="dashboard",
+            initiator="dashboard",
+            action=action,
+            recording_name=recording_name,
+            rgb=rgb,
+            duration_ms=duration_ms,
+            ok=ok,
+            error=error,
+        )

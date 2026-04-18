@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 
 class AutoExpressionTests(unittest.TestCase):
@@ -46,6 +47,47 @@ class AutoExpressionTests(unittest.TestCase):
                 delay_ms=350,
             ),
             (1000, None),
+        )
+
+    def test_controller_dispatch_fallback_reports_memory_callback(self) -> None:
+        from lelamp.auto_expression import AutoExpressionController
+
+        recorded = []
+        controller = AutoExpressionController(
+            animation_service="anim",
+            get_animation_service_error=lambda: None,
+            rgb_service="rgb",
+            led_count=8,
+            on_fallback_expression=lambda **kwargs: recorded.append(kwargs),
+        )
+
+        with patch(
+            "lelamp.auto_expression.dispatch_expression",
+            return_value="expression_ok",
+        ), patch(
+            "lelamp.auto_expression._now_ms",
+            side_effect=[1500, 1700],
+        ), patch.object(
+            controller,
+            "note_tool_dispatch",
+        ):
+            controller._dispatch_fallback(
+                style="greeting",
+                trigger="voice_silence_timeout",
+            )
+
+        self.assertEqual(
+            recorded,
+            [
+                {
+                    "style": "greeting",
+                    "trigger": "voice_silence_timeout",
+                    "started_ts_ms": 1500,
+                    "ended_ts_ms": 1700,
+                    "ok": True,
+                    "error": None,
+                }
+            ],
         )
 
 

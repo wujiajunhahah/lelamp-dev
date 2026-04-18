@@ -224,7 +224,18 @@ class RemoteControlConfigTests(unittest.TestCase):
             remote_control,
             "MotorsService",
             UnexpectedMotorsService,
-        ), patch.object(remote_control, "load_runtime_settings", return_value=fake_settings):
+        ), patch.object(
+            remote_control,
+            "_build_animation_service_with_proxy",
+            side_effect=lambda fallback_factory, **kwargs: fallback_factory(),
+        ), patch.object(remote_control, "load_runtime_settings", return_value=fake_settings), patch.object(
+            remote_control,
+            "record_standalone_playback",
+        ) as record_playback, patch.object(
+            remote_control,
+            "_elapsed_ms",
+            return_value=2034,
+        ):
             args = SimpleNamespace(
                 name="curious",
                 port="/dev/ttyACM0",
@@ -242,6 +253,16 @@ class RemoteControlConfigTests(unittest.TestCase):
         self.assertEqual(service.dispatched, [("play", "curious")])
         self.assertEqual(service.wait_timeout, 12.0)
         self.assertTrue(service.stopped)
+        record_playback.assert_called_once_with(
+            source="remote_control",
+            initiator="remote_control",
+            action="play",
+            recording_name="curious",
+            rgb=None,
+            duration_ms=2034,
+            ok=True,
+            error=None,
+        )
 
     def test_handle_solid_routes_via_rgb_proxy_when_agent_alive(self) -> None:
         with patch.dict(sys.modules, _fake_runtime_modules(), clear=False):
@@ -292,7 +313,10 @@ class RemoteControlConfigTests(unittest.TestCase):
                     "direct RGBService factory should not fire while proxy is reachable"
                 )
 
-            with patch.object(remote_control, "_build_rgb_service", side_effect=_fail_direct):
+            with patch.object(remote_control, "_build_rgb_service", side_effect=_fail_direct), patch.object(
+                remote_control,
+                "record_standalone_playback",
+            ) as record_playback:
                 args = SimpleNamespace(
                     enable_rgb=True, red=10, green=20, blue=30,
                 )
@@ -300,6 +324,32 @@ class RemoteControlConfigTests(unittest.TestCase):
 
                 args_clear = SimpleNamespace(enable_rgb=True)
                 self.assertEqual(remote_control._handle_clear(args_clear), 0)
+
+        self.assertEqual(
+            [call.kwargs for call in record_playback.call_args_list],
+            [
+                {
+                    "source": "remote_control",
+                    "initiator": "remote_control",
+                    "action": "light_solid",
+                    "recording_name": None,
+                    "rgb": (10, 20, 30),
+                    "duration_ms": None,
+                    "ok": True,
+                    "error": None,
+                },
+                {
+                    "source": "remote_control",
+                    "initiator": "remote_control",
+                    "action": "light_clear",
+                    "recording_name": None,
+                    "rgb": None,
+                    "duration_ms": None,
+                    "ok": True,
+                    "error": None,
+                },
+            ],
+        )
 
         self.assertEqual(rgb.dispatched, [("solid", (10, 20, 30))])
         self.assertTrue(rgb.cleared)

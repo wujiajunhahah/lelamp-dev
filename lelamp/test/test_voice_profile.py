@@ -99,6 +99,22 @@ class VoiceProfileTests(unittest.TestCase):
         self.assertIn("不要输出像“(shock + 白光)”这样的舞台提示", instructions)
         self.assertNotIn("关心某人 → shy + 暖黄光", instructions)
 
+    def test_memory_header_is_prepended_before_voice_profile(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            settings = load_runtime_settings()
+
+        with patch(
+            "lelamp.voice_profile.build_memory_header",
+            create=True,
+            return_value='<memory user_id="default">remember this</memory>',
+        ):
+            instructions = build_agent_instructions(settings)
+
+        self.assertTrue(
+            instructions.startswith('<memory user_id="default">remember this</memory>\n\n')
+        )
+        self.assertIn("刚搬来的室友", instructions)
+
 
 if __name__ == "__main__":
     unittest.main()

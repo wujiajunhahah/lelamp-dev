@@ -192,6 +192,200 @@ class QwenRealtimeTests(unittest.TestCase):
 
         asyncio.run(_exercise())
 
+    def test_smooth_animation_entrypoint_installs_memory_session_listeners(self) -> None:
+        import smooth_animation
+
+        class FakeSession:
+            async def start(self, **kwargs) -> None:
+                return None
+
+            async def generate_reply(self, instructions=None) -> None:
+                return None
+
+        async def _exercise() -> None:
+            settings = SimpleNamespace(
+                model_provider="qwen",
+                model_name="qwen3.5-omni-plus-realtime",
+                glm_use_server_vad=False,
+                console_enable_apm=False,
+                console_speech_threshold_db=-48.0,
+                console_silence_duration_s=0.4,
+                console_min_speech_duration_s=0.25,
+                console_commit_cooldown_s=1.0,
+                console_start_trigger_s=0.18,
+                console_output_suppression_s=0.6,
+                console_auto_calibrate=False,
+                console_calibration_duration_s=1.6,
+                console_calibration_margin_db=8.0,
+                voice_state_path="/tmp/test-voice-state.json",
+                led_count=40,
+            )
+            fake_agent = SimpleNamespace(
+                settings=settings,
+                auto_expression_controller=None,
+                animation_service="fake-animation-service",
+                animation_service_error=None,
+                rgb_service="fake-rgb-service",
+            )
+            fake_ctx = SimpleNamespace(
+                room="test-room",
+                add_shutdown_callback=lambda callback: None,
+                shutdown=Mock(),
+            )
+            installed = []
+            fake_memory_runtime = SimpleNamespace(
+                enabled=True,
+                install_session_listeners=lambda session, **kwargs: installed.append((session, kwargs)),
+                set_motor_bus_enabled=lambda enabled: None,
+                close=lambda: None,
+            )
+
+            with patch.object(
+                smooth_animation,
+                "load_runtime_settings",
+                return_value=settings,
+            ), patch.object(
+                smooth_animation,
+                "bootstrap_agent_runtime",
+                return_value=fake_memory_runtime,
+            ), patch.object(
+                smooth_animation,
+                "LeLamp",
+                return_value=fake_agent,
+            ), patch.object(
+                smooth_animation,
+                "build_realtime_model",
+                return_value="fake-llm",
+            ), patch.object(
+                smooth_animation,
+                "AgentSession",
+                return_value=FakeSession(),
+            ), patch.object(
+                smooth_animation,
+                "build_startup_reply_instructions",
+                return_value="灯灯醒了。",
+            ), patch.object(
+                smooth_animation.noise_cancellation,
+                "BVC",
+                return_value="fake-noise-cancellation",
+            ), patch.object(
+                smooth_animation,
+                "RoomInputOptions",
+                side_effect=lambda **kwargs: kwargs,
+            ):
+                await smooth_animation.entrypoint(fake_ctx)
+
+            assert len(installed) == 1
+            assert installed[0][1] == {
+                "model_provider": "qwen",
+                "model_name": "qwen3.5-omni-plus-realtime",
+            }
+
+        asyncio.run(_exercise())
+
+    def test_smooth_animation_entrypoint_wires_auto_expression_memory_callback(self) -> None:
+        import smooth_animation
+
+        class FakeSession:
+            async def start(self, **kwargs) -> None:
+                return None
+
+            async def generate_reply(self, instructions=None) -> None:
+                return None
+
+        async def _exercise() -> None:
+            constructed = []
+            settings = SimpleNamespace(
+                model_provider="qwen",
+                model_name="qwen3.5-omni-plus-realtime",
+                glm_use_server_vad=False,
+                console_enable_apm=False,
+                console_speech_threshold_db=-48.0,
+                console_silence_duration_s=0.4,
+                console_min_speech_duration_s=0.25,
+                console_commit_cooldown_s=1.0,
+                console_start_trigger_s=0.18,
+                console_output_suppression_s=0.6,
+                console_auto_calibrate=False,
+                console_calibration_duration_s=1.6,
+                console_calibration_margin_db=8.0,
+                voice_state_path="/tmp/test-voice-state.json",
+                led_count=40,
+            )
+            fake_agent = SimpleNamespace(
+                settings=settings,
+                auto_expression_controller=None,
+                animation_service="fake-animation-service",
+                animation_service_error=None,
+                rgb_service="fake-rgb-service",
+            )
+            fake_ctx = SimpleNamespace(
+                room="test-room",
+                add_shutdown_callback=lambda callback: None,
+                shutdown=Mock(),
+            )
+            fake_memory_runtime = SimpleNamespace(
+                enabled=True,
+                install_session_listeners=lambda session, **kwargs: None,
+                note_auto_expression_fallback=lambda **kwargs: None,
+                set_motor_bus_enabled=lambda enabled: None,
+                close=lambda: None,
+            )
+
+            class FakeAutoExpressionController:
+                def __init__(self, **kwargs) -> None:
+                    constructed.append(kwargs)
+
+                def start(self) -> None:
+                    return None
+
+                def stop(self) -> None:
+                    return None
+
+            with patch.object(
+                smooth_animation,
+                "load_runtime_settings",
+                return_value=settings,
+            ), patch.object(
+                smooth_animation,
+                "bootstrap_agent_runtime",
+                return_value=fake_memory_runtime,
+            ), patch.object(
+                smooth_animation,
+                "LeLamp",
+                return_value=fake_agent,
+            ), patch.object(
+                smooth_animation,
+                "AutoExpressionController",
+                FakeAutoExpressionController,
+            ), patch.object(
+                smooth_animation,
+                "build_realtime_model",
+                return_value="fake-llm",
+            ), patch.object(
+                smooth_animation,
+                "AgentSession",
+                return_value=FakeSession(),
+            ), patch.object(
+                smooth_animation,
+                "build_startup_reply_instructions",
+                return_value="灯灯醒了。",
+            ), patch.object(
+                smooth_animation.noise_cancellation,
+                "BVC",
+                return_value="fake-noise-cancellation",
+            ), patch.object(
+                smooth_animation,
+                "RoomInputOptions",
+                side_effect=lambda **kwargs: kwargs,
+            ):
+                await smooth_animation.entrypoint(fake_ctx)
+
+            assert len(constructed) == 1
+            assert callable(constructed[0]["on_fallback_expression"])
+
+        asyncio.run(_exercise())
+
     def test_smooth_animation_entrypoint_marks_motor_bus_enabled_from_server_state(self) -> None:
         import smooth_animation
 
