@@ -3,6 +3,7 @@ import base64
 import contextlib
 import os
 import unittest
+import warnings
 import wave
 from io import BytesIO
 from unittest.mock import Mock
@@ -31,6 +32,33 @@ class GLMRealtimeTests(unittest.TestCase):
             llm = build_realtime_model(settings)
 
         self.assertEqual(llm.__class__.__name__, "GLMRealtimeModel")
+
+    def test_build_realtime_model_for_glm_emits_no_audioop_deprecation(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "MODEL_PROVIDER": "glm",
+                "MODEL_API_KEY": "test-key",
+                "MODEL_BASE_URL": "https://open.bigmodel.cn/api/paas/v4/realtime",
+                "MODEL_NAME": "glm-realtime",
+                "MODEL_VOICE": "tongtong",
+            },
+            clear=True,
+        ):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                settings = load_runtime_settings()
+                llm = build_realtime_model(settings)
+
+        self.assertEqual(llm.__class__.__name__, "GLMRealtimeModel")
+        self.assertFalse(
+            [
+                warning
+                for warning in caught
+                if issubclass(warning.category, DeprecationWarning)
+                and "audioop" in str(warning.message)
+            ]
+        )
 
     def test_build_realtime_model_keeps_openai_for_openai_provider(self) -> None:
         with patch.dict(

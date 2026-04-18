@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import audioop
 import asyncio
 import base64
 from copy import deepcopy
@@ -10,6 +9,7 @@ from urllib.parse import urlparse, urlunparse
 import wave
 
 from livekit.plugins.openai.realtime import realtime_model as oai_rt
+import numpy as np
 
 from lelamp.reply_sanitizer import sanitize_spoken_reply
 from lelamp.runtime_config import RuntimeSettings
@@ -23,6 +23,7 @@ _GLM_TTS_SOURCE = "e2e"
 _GLM_AUTO_SEARCH = False
 _GLM_TOOL_LIMIT = 10
 _GLM_INPUT_SAMPLE_RATE = 16000
+_PCM16_DTYPE = np.dtype("<i2")
 
 
 def build_glm_beta_fields(settings: RuntimeSettings) -> dict[str, object]:
@@ -105,6 +106,33 @@ def _glm_ws_url(base_url: str) -> str:
 
     parsed = urlparse(base_url)
     return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", parsed.query, ""))
+
+
+def _resample_pcm16(audio_bytes: bytes, *, src_rate: int, dst_rate: int, channels: int) -> bytes:
+    if src_rate == dst_rate or not audio_bytes:
+        return audio_bytes
+
+    samples = np.frombuffer(audio_bytes, dtype=_PCM16_DTYPE)
+    frame_count = samples.size // channels
+    if frame_count == 0:
+        return b""
+
+    samples = samples[: frame_count * channels].reshape(frame_count, channels)
+    target_frame_count = max(1, round(frame_count * dst_rate / src_rate))
+    if target_frame_count == frame_count:
+        return samples.astype(_PCM16_DTYPE, copy=False).tobytes()
+
+    source_positions = np.arange(frame_count, dtype=np.float64)
+    target_positions = np.arange(target_frame_count, dtype=np.float64) * src_rate / dst_rate
+    target_positions = np.clip(target_positions, 0, frame_count - 1)
+
+    resampled = np.empty((target_frame_count, channels), dtype=np.int16)
+    for channel_index in range(channels):
+        channel = samples[:, channel_index].astype(np.float64, copy=False)
+        channel_resampled = np.interp(target_positions, source_positions, channel)
+        resampled[:, channel_index] = np.clip(np.rint(channel_resampled), -32768, 32767).astype(np.int16)
+
+    return resampled.astype(_PCM16_DTYPE, copy=False).tobytes()
 
 
 class GLMRealtimeModel(oai_rt.RealtimeModel):
@@ -315,13 +343,11 @@ class GLMRealtimeSession(oai_rt.RealtimeSession):
     def _build_wav_bytes(audio_bytes: bytes) -> bytes:
         wav_audio = audio_bytes
         if oai_rt.SAMPLE_RATE != _GLM_INPUT_SAMPLE_RATE:
-            wav_audio, _ = audioop.ratecv(
+            wav_audio = _resample_pcm16(
                 audio_bytes,
-                2,
-                oai_rt.NUM_CHANNELS,
-                oai_rt.SAMPLE_RATE,
-                _GLM_INPUT_SAMPLE_RATE,
-                None,
+                src_rate=oai_rt.SAMPLE_RATE,
+                dst_rate=_GLM_INPUT_SAMPLE_RATE,
+                channels=oai_rt.NUM_CHANNELS,
             )
 
         wav_buffer = BytesIO()
