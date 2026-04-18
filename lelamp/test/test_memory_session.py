@@ -11,6 +11,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from contextlib import contextmanager
 
 import pytest
 
@@ -87,6 +88,28 @@ class TestStartAgentSession:
 
         assert seen["cwd"] == Path(__file__).resolve().parents[2]
         assert meta["git_ref"] == "abc1234"
+
+    def test_phase1_resolves_git_ref_before_taking_global_lock(self, writer, monkeypatch):
+        events = []
+
+        @contextmanager
+        def fake_flock(_path):
+            events.append("lock_enter")
+            try:
+                yield
+            finally:
+                events.append("lock_exit")
+
+        def fake_git_ref(cwd=None):
+            events.append("git_ref")
+            return "abc1234"
+
+        monkeypatch.setattr(memsession, "_flock", fake_flock)
+        monkeypatch.setattr(memsession, "_git_ref", fake_git_ref)
+
+        start_agent_session(writer, now=_fixed_ts())
+
+        assert events[:3] == ["git_ref", "lock_enter", "lock_exit"]
 
     def test_collision_suffix_appended(self, writer):
         ts = _fixed_ts()

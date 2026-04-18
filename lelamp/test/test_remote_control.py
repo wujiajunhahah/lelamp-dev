@@ -12,7 +12,9 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-if "livekit.plugins" not in sys.modules:
+try:
+    from livekit import plugins as _livekit_plugins  # noqa: F401
+except Exception:
     fake_livekit = types.ModuleType("livekit")
     fake_plugins = types.ModuleType("livekit.plugins")
     fake_plugins.openai = object()
@@ -42,6 +44,7 @@ class _LiveServer:
             log_level="warning",
             lifespan="off",
             access_log=False,
+            ws="none",
         )
         self._server = uvicorn.Server(config)
         self._thread = threading.Thread(target=self._server.run, daemon=True)
@@ -222,7 +225,18 @@ class RemoteControlConfigTests(unittest.TestCase):
             remote_control,
             "MotorsService",
             UnexpectedMotorsService,
-        ), patch.object(remote_control, "load_runtime_settings", return_value=fake_settings):
+        ), patch.object(
+            remote_control,
+            "_build_animation_service_with_proxy",
+            side_effect=lambda fallback_factory, **kwargs: fallback_factory(),
+        ), patch.object(remote_control, "load_runtime_settings", return_value=fake_settings), patch.object(
+            remote_control,
+            "record_standalone_playback",
+        ) as record_playback, patch.object(
+            remote_control,
+            "_elapsed_ms",
+            return_value=2034,
+        ):
             args = SimpleNamespace(
                 name="curious",
                 port="/dev/ttyACM0",
@@ -240,6 +254,16 @@ class RemoteControlConfigTests(unittest.TestCase):
         self.assertEqual(service.dispatched, [("play", "curious")])
         self.assertEqual(service.wait_timeout, 12.0)
         self.assertTrue(service.stopped)
+        record_playback.assert_called_once_with(
+            source="remote_control",
+            initiator="remote_control",
+            action="play",
+            recording_name="curious",
+            rgb=None,
+            duration_ms=2034,
+            ok=True,
+            error=None,
+        )
 
     def test_handle_solid_routes_via_rgb_proxy_when_agent_alive(self) -> None:
         with patch.dict(sys.modules, _fake_runtime_modules(), clear=False):
@@ -290,7 +314,10 @@ class RemoteControlConfigTests(unittest.TestCase):
                     "direct RGBService factory should not fire while proxy is reachable"
                 )
 
-            with patch.object(remote_control, "_build_rgb_service", side_effect=_fail_direct):
+            with patch.object(remote_control, "_build_rgb_service", side_effect=_fail_direct), patch.object(
+                remote_control,
+                "record_standalone_playback",
+            ) as record_playback:
                 args = SimpleNamespace(
                     enable_rgb=True, red=10, green=20, blue=30,
                 )
@@ -298,6 +325,32 @@ class RemoteControlConfigTests(unittest.TestCase):
 
                 args_clear = SimpleNamespace(enable_rgb=True)
                 self.assertEqual(remote_control._handle_clear(args_clear), 0)
+
+        self.assertEqual(
+            [call.kwargs for call in record_playback.call_args_list],
+            [
+                {
+                    "source": "remote_control",
+                    "initiator": "remote_control",
+                    "action": "light_solid",
+                    "recording_name": None,
+                    "rgb": (10, 20, 30),
+                    "duration_ms": None,
+                    "ok": True,
+                    "error": None,
+                },
+                {
+                    "source": "remote_control",
+                    "initiator": "remote_control",
+                    "action": "light_clear",
+                    "recording_name": None,
+                    "rgb": None,
+                    "duration_ms": None,
+                    "ok": True,
+                    "error": None,
+                },
+            ],
+        )
 
         self.assertEqual(rgb.dispatched, [("solid", (10, 20, 30))])
         self.assertTrue(rgb.cleared)
@@ -336,11 +389,24 @@ class RemoteControlConfigTests(unittest.TestCase):
             remote_control,
             "current_sentinel",
             return_value=fake_sentinel,
-        ) as spy:
+        ) as spy, patch.object(
+            remote_control,
+            "record_standalone_playback",
+        ) as record_playback:
             self.assertEqual(remote_control._handle_startup(args), 2)
             # Must probe the motor domain, not generic "any"; otherwise an
             # agent that failed to acquire the bus would still get refused.
             spy.assert_called_once_with(require=remote_control.REQUIRE_MOTOR)
+            record_playback.assert_called_once_with(
+                source="remote_control",
+                initiator="remote_control",
+                action="startup",
+                recording_name="wake_up",
+                rgb=None,
+                duration_ms=None,
+                ok=False,
+                error="Voice agent is running and already owns the serial port",
+            )
 
     def test_handle_shutdown_refuses_when_agent_motor_live(self) -> None:
         with patch.dict(sys.modules, _fake_runtime_modules(include_follower=True), clear=False):
@@ -358,14 +424,256 @@ class RemoteControlConfigTests(unittest.TestCase):
             port="/dev/ttyACM0",
             id="lelamp",
             fps=30,
+            enable_rgb=False,
         )
         with patch.object(
             remote_control,
             "current_sentinel",
             return_value=fake_sentinel,
-        ) as spy:
+        ) as spy, patch.object(
+            remote_control,
+            "record_standalone_playback",
+        ) as record_playback:
             self.assertEqual(remote_control._handle_shutdown(args), 2)
             spy.assert_called_once_with(require=remote_control.REQUIRE_MOTOR)
+            record_playback.assert_called_once_with(
+                source="remote_control",
+                initiator="remote_control",
+                action="shutdown_pose",
+                recording_name="power_off",
+                rgb=None,
+                duration_ms=None,
+                ok=False,
+                error="Voice agent is running and already owns the serial port",
+            )
+
+    def test_handle_startup_records_playback_success(self) -> None:
+        with patch.dict(sys.modules, _fake_runtime_modules(include_follower=True), clear=False):
+            sys.modules.pop("lelamp.remote_control", None)
+            from lelamp import remote_control
+
+        fake_follower_module = types.ModuleType("lelamp.follower")
+
+        class FakeBus:
+            def __init__(self) -> None:
+                self.is_connected = False
+                self.writes: list[tuple[str, str, int]] = []
+
+            def sync_read(self, register: str):
+                self.last_sync_read = register
+                return {"base_yaw": 0.1}
+
+            def write(self, register: str, joint: str, value: int) -> None:
+                self.writes.append((register, joint, value))
+
+            def disconnect(self, disable_torque: bool = False) -> None:
+                self.is_connected = False
+
+            def disconnect(self, disable_torque: bool = False) -> None:
+                self.is_connected = False
+
+            def disconnect(self, disable_torque: bool = False) -> None:
+                self.is_connected = False
+
+            def disconnect(self, disable_torque: bool = False) -> None:
+                self.is_connected = False
+
+        class FakeConfig:
+            def __init__(self, **kwargs) -> None:
+                self.kwargs = kwargs
+
+        class FakeFollower:
+            instances: list["FakeFollower"] = []
+
+            def __init__(self, config) -> None:
+                self.config = config
+                self.bus = FakeBus()
+                self.is_connected = False
+                self.actions: list[dict[str, float]] = []
+                FakeFollower.instances.append(self)
+
+            def connect(self, calibrate: bool = False) -> None:
+                self.is_connected = True
+                self.bus.is_connected = True
+
+            def disconnect(self) -> None:
+                self.is_connected = False
+                self.bus.is_connected = False
+
+            def send_action(self, frame: dict[str, float]) -> None:
+                self.actions.append(frame)
+
+        fake_follower_module.LeLampFollower = FakeFollower
+        fake_follower_module.LeLampFollowerConfig = FakeConfig
+
+        args = SimpleNamespace(
+            recording="wake_up",
+            home_recording="home_safe",
+            port="/dev/ttyACM0",
+            id="lelamp",
+            enable_rgb=False,
+            settle_frames=1,
+            settle_hold_frames=0,
+            settle_fps=30,
+            wake_fps=30,
+            post_wake_hold=0.0,
+            led_count=40,
+            led_pin=12,
+            led_freq_hz=800000,
+            led_dma=10,
+            led_brightness=255,
+            led_invert=False,
+            led_channel=0,
+        )
+        with patch.dict(sys.modules, {"lelamp.follower": fake_follower_module}, clear=False), patch.object(
+            remote_control,
+            "current_sentinel",
+            return_value=None,
+        ), patch.object(
+            remote_control,
+            "_load_first_pose",
+            return_value={"base_yaw.pos": 0.0},
+        ), patch.object(
+            remote_control,
+            "_load_recording_actions",
+            return_value=[{"base_yaw.pos": 0.2}],
+        ), patch.object(
+            remote_control,
+            "build_dynamic_startup_actions",
+            return_value=[{"base_yaw.pos": 0.0}, {"base_yaw.pos": 0.2}],
+        ), patch.object(
+            remote_control.time,
+            "sleep",
+            return_value=None,
+        ), patch.object(
+            remote_control,
+            "_elapsed_ms",
+            return_value=2034,
+        ), patch.object(
+            remote_control,
+            "record_standalone_playback",
+        ) as record_playback:
+            self.assertEqual(remote_control._handle_startup(args), 0)
+
+        self.assertEqual(len(FakeFollower.instances), 1)
+        self.assertEqual(
+            FakeFollower.instances[0].actions,
+            [{"base_yaw.pos": 0.0}, {"base_yaw.pos": 0.2}],
+        )
+        record_playback.assert_called_once_with(
+            source="remote_control",
+            initiator="remote_control",
+            action="startup",
+            recording_name="wake_up",
+            rgb=None,
+            duration_ms=2034,
+            ok=True,
+            error=None,
+        )
+
+    def test_handle_shutdown_records_playback_success(self) -> None:
+        with patch.dict(sys.modules, _fake_runtime_modules(include_follower=True), clear=False):
+            sys.modules.pop("lelamp.remote_control", None)
+            from lelamp import remote_control
+
+        fake_follower_module = types.ModuleType("lelamp.follower")
+
+        class FakeBus:
+            def __init__(self) -> None:
+                self.is_connected = False
+                self.writes: list[tuple[str, str, int]] = []
+
+            def sync_read(self, register: str):
+                self.last_sync_read = register
+                return {"base_yaw": 0.1}
+
+            def write(self, register: str, joint: str, value: int) -> None:
+                self.writes.append((register, joint, value))
+
+            def disconnect(self, disable_torque: bool = False) -> None:
+                self.is_connected = False
+
+        class FakeConfig:
+            def __init__(self, **kwargs) -> None:
+                self.kwargs = kwargs
+
+        class FakeFollower:
+            instances: list["FakeFollower"] = []
+
+            def __init__(self, config) -> None:
+                self.config = config
+                self.bus = FakeBus()
+                self.actions: list[dict[str, float]] = []
+                FakeFollower.instances.append(self)
+
+            def connect(self, calibrate: bool = False) -> None:
+                self.bus.is_connected = True
+
+            def disconnect(self, disable_torque: bool = False) -> None:
+                self.bus.is_connected = False
+
+            def send_action(self, frame: dict[str, float]) -> None:
+                self.actions.append(frame)
+
+        fake_follower_module.LeLampFollower = FakeFollower
+        fake_follower_module.LeLampFollowerConfig = FakeConfig
+
+        args = SimpleNamespace(
+            recording="power_off",
+            port="/dev/ttyACM0",
+            id="lelamp",
+            fps=30,
+            enable_rgb=False,
+            prepare_fraction=0.22,
+            prepare_frames=10,
+            settle_frames=16,
+            hold_frames=8,
+            final_hold=0.0,
+            release_pause=0.0,
+            keep_led_on=False,
+        )
+        with patch.dict(sys.modules, {"lelamp.follower": fake_follower_module}, clear=False), patch.object(
+            remote_control,
+            "current_sentinel",
+            return_value=None,
+        ), patch.object(
+            remote_control,
+            "_load_first_pose",
+            return_value={"base_yaw.pos": 0.0},
+        ), patch.object(
+            remote_control,
+            "build_staged_shutdown_actions",
+            return_value=[{"base_yaw.pos": 0.0}, {"base_yaw.pos": -0.1}],
+        ), patch.object(
+            remote_control,
+            "_play_frames",
+            return_value=None,
+        ), patch.object(
+            remote_control.time,
+            "sleep",
+            return_value=None,
+        ), patch.object(
+            remote_control,
+            "_elapsed_ms",
+            return_value=2500,
+        ), patch.object(
+            remote_control,
+            "record_standalone_playback",
+        ) as record_playback:
+            self.assertEqual(remote_control._handle_shutdown(args), 0)
+
+        self.assertEqual(len(FakeFollower.instances), 1)
+        self.assertEqual(FakeFollower.instances[0].actions, [{"base_yaw.pos": -0.1}])
+        record_playback.assert_called_once_with(
+            source="remote_control",
+            initiator="remote_control",
+            action="shutdown_pose",
+            recording_name="power_off",
+            rgb=None,
+            duration_ms=2500,
+            ok=True,
+            error=None,
+        )
 
     def test_handle_sync_pose_recordings_writes_default_pose_files_and_env(self) -> None:
         with patch.dict(sys.modules, _fake_runtime_modules(), clear=False):

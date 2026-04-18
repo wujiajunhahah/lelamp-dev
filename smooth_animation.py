@@ -29,6 +29,7 @@ from lelamp.voice_profile import (
 )
 from lelamp.auto_expression import AutoExpressionController
 from lelamp.expression_engine import ExpressionStyle, dispatch_expression
+from lelamp.memory.runtime import bootstrap_agent_runtime
 from lelamp.motor_bus.server import MotorBusServer
 from lelamp.service.motors.animation_service import AnimationService
 from lelamp.service.rgb.rgb_service import RGBService
@@ -270,13 +271,21 @@ class LeLamp(Agent):
 
 # Entry to the agent
 async def entrypoint(ctx: agents.JobContext):
-    agent = LeLamp(settings=load_runtime_settings())
+    settings = load_runtime_settings()
+    memory_runtime = bootstrap_agent_runtime(settings)
+    agent = LeLamp(settings=settings)
     if hasattr(agent, "animation_service") and hasattr(agent, "settings"):
+        fallback_callback = getattr(
+            memory_runtime,
+            "note_auto_expression_fallback",
+            None,
+        )
         agent.auto_expression_controller = AutoExpressionController(
             animation_service=agent.animation_service,
             get_animation_service_error=lambda: agent.animation_service_error,
             rgb_service=agent.rgb_service,
             led_count=agent.settings.led_count,
+            on_fallback_expression=fallback_callback,
         )
         agent.auto_expression_controller.start()
 
@@ -301,6 +310,26 @@ async def entrypoint(ctx: agents.JobContext):
         logger.exception("motor bus server bootstrap failed")
         motor_bus_server = None
 
+    memory_runtime.set_motor_bus_enabled(
+        motor_bus_server.is_ready() if motor_bus_server is not None else False
+    )
+
+    async def _shutdown_callback(reason: str = "") -> None:
+        del reason
+        if agent.auto_expression_controller is not None:
+            try:
+                agent.auto_expression_controller.stop()
+            except Exception:
+                logger.exception("auto expression stop failed during shutdown")
+        if motor_bus_server is not None:
+            try:
+                motor_bus_server.stop()
+            except Exception:
+                logger.exception("motor bus stop failed during shutdown")
+        memory_runtime.close()
+
+    ctx.add_shutdown_callback(_shutdown_callback)
+    atexit.register(memory_runtime.close)
     if motor_bus_server is not None:
         atexit.register(motor_bus_server.stop)
 
@@ -329,18 +358,32 @@ async def entrypoint(ctx: agents.JobContext):
         session_kwargs["turn_detection"] = "manual"
 
     session = AgentSession(**session_kwargs)
+    install_session_listeners = getattr(memory_runtime, "install_session_listeners", None)
+    if callable(install_session_listeners):
+        install_session_listeners(
+            session,
+            model_provider=getattr(agent.settings, "model_provider", None),
+            model_name=getattr(agent.settings, "model_name", None),
+        )
 
-    await session.start(
-        room=ctx.room,
-        agent=agent,
-        room_input_options=RoomInputOptions(
-            noise_cancellation=noise_cancellation.BVC(),
-        ),
-    )
+    try:
+        await session.start(
+            room=ctx.room,
+            agent=agent,
+            room_input_options=RoomInputOptions(
+                noise_cancellation=noise_cancellation.BVC(),
+            ),
+        )
 
-    await session.generate_reply(
-        instructions=build_startup_reply_instructions(agent.settings)
-    )
+        await session.generate_reply(
+            instructions=build_startup_reply_instructions(agent.settings)
+        )
+    except Exception as exc:
+        try:
+            ctx.shutdown(reason=f"entrypoint_failed:{type(exc).__name__}")
+        except Exception:
+            logger.exception("job shutdown failed after entrypoint exception")
+        raise
 
 if __name__ == "__main__":
     agents.cli.run_app(agents.WorkerOptions(entrypoint_fnc=entrypoint, num_idle_processes=1))

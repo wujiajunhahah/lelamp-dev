@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from threading import Event, Lock, Thread
 from time import time
-from typing import Any
+from typing import Any, Callable
 
 from lelamp.expression_engine import ExpressionStyle, dispatch_expression
 from lelamp.voice_telemetry import get_voice_telemetry
@@ -82,6 +82,7 @@ class AutoExpressionController:
         get_animation_service_error,
         rgb_service,
         led_count: int,
+        on_fallback_expression: Callable[..., None] | None = None,
         delay_ms: int = _DEFAULT_DELAY_MS,
         poll_interval_s: float = _DEFAULT_POLL_INTERVAL_S,
     ) -> None:
@@ -89,6 +90,7 @@ class AutoExpressionController:
         self._get_animation_service_error = get_animation_service_error
         self._rgb_service = rgb_service
         self._led_count = led_count
+        self._on_fallback_expression = on_fallback_expression
         self._delay_ms = max(int(delay_ms), 0)
         self._poll_interval_s = max(float(poll_interval_s), 0.05)
         self._stop_event = Event()
@@ -111,6 +113,45 @@ class AutoExpressionController:
     def note_tool_dispatch(self) -> None:
         with self._state_lock:
             self._last_tool_dispatch_at_ms = _now_ms()
+
+    def _dispatch_fallback(self, *, style: ExpressionStyle, trigger: str) -> None:
+        started_ts_ms = _now_ms()
+        ok = False
+        error = None
+        try:
+            result = dispatch_expression(
+                style=style,
+                animation_service=self._animation_service,
+                animation_service_error=self._get_animation_service_error(),
+                rgb_service=self._rgb_service,
+                led_count=self._led_count,
+            )
+            ok = True
+            self.note_tool_dispatch()
+            logger.debug(
+                "Auto expression fallback dispatched",
+                extra={"style": style, "result": result},
+            )
+        except Exception as exc:
+            error = str(exc)
+            logger.exception("Auto expression fallback failed", extra={"style": style})
+        finally:
+            ended_ts_ms = _now_ms()
+            if self._on_fallback_expression is not None:
+                try:
+                    self._on_fallback_expression(
+                        style=style,
+                        trigger=trigger,
+                        started_ts_ms=started_ts_ms,
+                        ended_ts_ms=ended_ts_ms,
+                        ok=ok,
+                        error=error,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Auto expression memory callback failed",
+                        extra={"style": style},
+                    )
 
     def _run(self) -> None:
         telemetry = get_voice_telemetry()
@@ -138,18 +179,7 @@ class AutoExpressionController:
             if style is None:
                 continue
 
-            try:
-                result = dispatch_expression(
-                    style=style,
-                    animation_service=self._animation_service,
-                    animation_service_error=self._get_animation_service_error(),
-                    rgb_service=self._rgb_service,
-                    led_count=self._led_count,
-                )
-                self.note_tool_dispatch()
-                logger.debug(
-                    "Auto expression fallback dispatched",
-                    extra={"style": style, "result": result, "commit_at_ms": commit_at_ms},
-                )
-            except Exception:
-                logger.exception("Auto expression fallback failed", extra={"style": style})
+            self._dispatch_fallback(
+                style=style,
+                trigger="voice_silence_timeout",
+            )

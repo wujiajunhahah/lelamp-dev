@@ -4,7 +4,9 @@ import types
 import unittest
 from unittest.mock import patch
 
-if "livekit.plugins" not in sys.modules:
+try:
+    from livekit import plugins as _livekit_plugins  # noqa: F401
+except Exception:
     fake_livekit = types.ModuleType("livekit")
     fake_plugins = types.ModuleType("livekit.plugins")
     fake_plugins.openai = object()

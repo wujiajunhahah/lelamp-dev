@@ -248,11 +248,7 @@ def _write_meta_phase1_locked(
     start_iso = base_ts.astimezone().isoformat()
     tz_name = _local_timezone_name()
     pid = None if is_manual else (pid_override if pid_override is not None else os.getpid())
-    git_ref = (
-        git_ref_override
-        if git_ref_override is not None
-        else _git_ref(cwd=_repo_root_hint())
-    )
+    git_ref = git_ref_override
 
     meta = _build_phase1_meta(
         session_id=session_id,
@@ -393,6 +389,7 @@ def start_agent_session(
     """
 
     base = now if now is not None else datetime.now().astimezone()
+    resolved_git_ref = git_ref if git_ref is not None else _git_ref(cwd=_repo_root_hint())
     with _flock(writer.user_dir / ".lock"):
         session_id, meta_path, start_ts_ms = _write_meta_phase1_locked(
             writer,
@@ -400,7 +397,7 @@ def start_agent_session(
             base_ts=base,
             model_providers=model_providers,
             pid_override=pid,
-            git_ref_override=git_ref,
+            git_ref_override=resolved_git_ref,
         )
     return SessionHandle(
         session_id=session_id,
@@ -467,6 +464,7 @@ def attach_or_create_session(
     """
 
     base = now if now is not None else datetime.now().astimezone()
+    resolved_git_ref = _git_ref(cwd=_repo_root_hint())
     with _flock(writer.user_dir / ".lock"):
         metas = _iter_meta_candidates(writer)
         live = _find_live_agent_session(metas)
@@ -486,6 +484,7 @@ def attach_or_create_session(
             writer,
             is_manual=True,
             base_ts=base,
+            git_ref_override=resolved_git_ref,
         )
     return SessionHandle(
         session_id=session_id,

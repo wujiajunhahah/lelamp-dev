@@ -19,8 +19,10 @@ class AudioControlsTests(unittest.TestCase):
             [
                 ["sudo", "-u", "wujiajun", "amixer", "-c", "2", "sset", "PCM", "100%"],
                 ["sudo", "-u", "wujiajun", "amixer", "-c", "2", "sset", "Line", "100%"],
+                ["sudo", "-u", "wujiajun", "amixer", "-c", "2", "sset", "Line", "unmute"],
                 ["sudo", "-u", "wujiajun", "amixer", "-c", "2", "sset", "Line DAC", "100%"],
                 ["sudo", "-u", "wujiajun", "amixer", "-c", "2", "sset", "HP", "100%"],
+                ["sudo", "-u", "wujiajun", "amixer", "-c", "2", "sset", "HP", "unmute"],
                 ["sudo", "-u", "wujiajun", "amixer", "-c", "2", "sset", "HP DAC", "100%"],
             ],
         )
@@ -39,8 +41,10 @@ class AudioControlsTests(unittest.TestCase):
             [
                 ["amixer", "-c", "2", "sset", "PCM", "100%"],
                 ["amixer", "-c", "2", "sset", "Line", "100%"],
+                ["amixer", "-c", "2", "sset", "Line", "unmute"],
                 ["amixer", "-c", "2", "sset", "Line DAC", "100%"],
                 ["amixer", "-c", "2", "sset", "HP", "100%"],
+                ["amixer", "-c", "2", "sset", "HP", "unmute"],
                 ["amixer", "-c", "2", "sset", "HP DAC", "100%"],
             ],
         )
