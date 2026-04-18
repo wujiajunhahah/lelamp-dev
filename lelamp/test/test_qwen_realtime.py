@@ -12,6 +12,361 @@ from lelamp.runtime_config import build_realtime_model, load_runtime_settings
 
 
 class QwenRealtimeTests(unittest.TestCase):
+    def test_smooth_animation_entrypoint_bootstraps_memory_before_lamp_init(self) -> None:
+        import smooth_animation
+
+        class FakeSession:
+            async def start(self, **kwargs) -> None:
+                return None
+
+            async def generate_reply(self, instructions=None) -> None:
+                return None
+
+        async def _exercise() -> None:
+            order: list[str] = []
+            settings = SimpleNamespace(
+                model_provider="qwen",
+                glm_use_server_vad=False,
+                console_enable_apm=False,
+                console_speech_threshold_db=-48.0,
+                console_silence_duration_s=0.4,
+                console_min_speech_duration_s=0.25,
+                console_commit_cooldown_s=1.0,
+                console_start_trigger_s=0.18,
+                console_output_suppression_s=0.6,
+                console_auto_calibrate=False,
+                console_calibration_duration_s=1.6,
+                console_calibration_margin_db=8.0,
+                voice_state_path="/tmp/test-voice-state.json",
+                led_count=40,
+            )
+            fake_agent = SimpleNamespace(
+                settings=settings,
+                auto_expression_controller=None,
+                animation_service="fake-animation-service",
+                animation_service_error=None,
+                rgb_service="fake-rgb-service",
+            )
+            fake_ctx = SimpleNamespace(
+                room="test-room",
+                add_shutdown_callback=lambda callback: None,
+                shutdown=Mock(),
+            )
+            fake_memory_runtime = SimpleNamespace(
+                enabled=True,
+                set_motor_bus_enabled=lambda enabled: None,
+                close=lambda: None,
+            )
+
+            def fake_bootstrap(_settings):
+                order.append("memory")
+                return fake_memory_runtime
+
+            def fake_lamp(*args, **kwargs):
+                order.append("lamp")
+                return fake_agent
+
+            with patch.object(
+                smooth_animation,
+                "load_runtime_settings",
+                return_value=settings,
+            ), patch.object(
+                smooth_animation,
+                "bootstrap_agent_runtime",
+                side_effect=fake_bootstrap,
+            ), patch.object(
+                smooth_animation,
+                "LeLamp",
+                side_effect=fake_lamp,
+            ), patch.object(
+                smooth_animation,
+                "build_realtime_model",
+                return_value="fake-llm",
+            ), patch.object(
+                smooth_animation,
+                "AgentSession",
+                return_value=FakeSession(),
+            ), patch.object(
+                smooth_animation,
+                "build_startup_reply_instructions",
+                return_value="灯灯醒了。",
+            ), patch.object(
+                smooth_animation.noise_cancellation,
+                "BVC",
+                return_value="fake-noise-cancellation",
+            ), patch.object(
+                smooth_animation,
+                "RoomInputOptions",
+                side_effect=lambda **kwargs: kwargs,
+            ):
+                await smooth_animation.entrypoint(fake_ctx)
+
+            self.assertEqual(order[:2], ["memory", "lamp"])
+
+        asyncio.run(_exercise())
+
+    def test_smooth_animation_entrypoint_registers_shutdown_callback_for_memory_close(self) -> None:
+        import smooth_animation
+
+        class FakeSession:
+            async def start(self, **kwargs) -> None:
+                return None
+
+            async def generate_reply(self, instructions=None) -> None:
+                return None
+
+        async def _exercise() -> None:
+            callbacks = []
+            events: list[str] = []
+            settings = SimpleNamespace(
+                model_provider="qwen",
+                glm_use_server_vad=False,
+                console_enable_apm=False,
+                console_speech_threshold_db=-48.0,
+                console_silence_duration_s=0.4,
+                console_min_speech_duration_s=0.25,
+                console_commit_cooldown_s=1.0,
+                console_start_trigger_s=0.18,
+                console_output_suppression_s=0.6,
+                console_auto_calibrate=False,
+                console_calibration_duration_s=1.6,
+                console_calibration_margin_db=8.0,
+                voice_state_path="/tmp/test-voice-state.json",
+                led_count=40,
+            )
+            fake_agent = SimpleNamespace(
+                settings=settings,
+                auto_expression_controller=SimpleNamespace(
+                    stop=lambda: events.append("auto.stop")
+                ),
+            )
+            fake_ctx = SimpleNamespace(
+                room="test-room",
+                add_shutdown_callback=lambda callback: callbacks.append(callback),
+                shutdown=Mock(),
+            )
+            fake_memory_runtime = SimpleNamespace(
+                enabled=True,
+                set_motor_bus_enabled=lambda enabled: None,
+                close=lambda: events.append("memory.close"),
+            )
+
+            with patch.object(
+                smooth_animation,
+                "load_runtime_settings",
+                return_value=settings,
+            ), patch.object(
+                smooth_animation,
+                "bootstrap_agent_runtime",
+                return_value=fake_memory_runtime,
+            ), patch.object(
+                smooth_animation,
+                "LeLamp",
+                return_value=fake_agent,
+            ), patch.object(
+                smooth_animation,
+                "build_realtime_model",
+                return_value="fake-llm",
+            ), patch.object(
+                smooth_animation,
+                "AgentSession",
+                return_value=FakeSession(),
+            ), patch.object(
+                smooth_animation,
+                "build_startup_reply_instructions",
+                return_value="灯灯醒了。",
+            ), patch.object(
+                smooth_animation.noise_cancellation,
+                "BVC",
+                return_value="fake-noise-cancellation",
+            ), patch.object(
+                smooth_animation,
+                "RoomInputOptions",
+                side_effect=lambda **kwargs: kwargs,
+            ):
+                await smooth_animation.entrypoint(fake_ctx)
+
+            self.assertEqual(len(callbacks), 1)
+            await callbacks[0]("room_disconnect")
+            self.assertEqual(events, ["auto.stop", "memory.close"])
+
+        asyncio.run(_exercise())
+
+    def test_smooth_animation_entrypoint_marks_motor_bus_enabled_from_server_state(self) -> None:
+        import smooth_animation
+
+        class FakeSession:
+            async def start(self, **kwargs) -> None:
+                return None
+
+            async def generate_reply(self, instructions=None) -> None:
+                return None
+
+        async def _exercise() -> None:
+            motor_flags = []
+            settings = SimpleNamespace(
+                model_provider="qwen",
+                glm_use_server_vad=False,
+                console_enable_apm=False,
+                console_speech_threshold_db=-48.0,
+                console_silence_duration_s=0.4,
+                console_min_speech_duration_s=0.25,
+                console_commit_cooldown_s=1.0,
+                console_start_trigger_s=0.18,
+                console_output_suppression_s=0.6,
+                console_auto_calibrate=False,
+                console_calibration_duration_s=1.6,
+                console_calibration_margin_db=8.0,
+                voice_state_path="/tmp/test-voice-state.json",
+                led_count=40,
+            )
+            fake_agent = SimpleNamespace(
+                settings=settings,
+                auto_expression_controller=None,
+                animation_service="fake-animation-service",
+                animation_service_error=None,
+                rgb_service="fake-rgb-service",
+            )
+            fake_ctx = SimpleNamespace(
+                room="test-room",
+                add_shutdown_callback=lambda callback: None,
+                shutdown=Mock(),
+            )
+            fake_memory_runtime = SimpleNamespace(
+                enabled=True,
+                set_motor_bus_enabled=lambda enabled: motor_flags.append(enabled),
+                close=lambda: None,
+            )
+            fake_motor_bus = SimpleNamespace(
+                start=lambda: None,
+                is_ready=lambda: True,
+                host="127.0.0.1",
+                port=8770,
+                stop=lambda: None,
+            )
+
+            with patch.object(
+                smooth_animation,
+                "load_runtime_settings",
+                return_value=settings,
+            ), patch.object(
+                smooth_animation,
+                "bootstrap_agent_runtime",
+                return_value=fake_memory_runtime,
+            ), patch.object(
+                smooth_animation,
+                "LeLamp",
+                return_value=fake_agent,
+            ), patch.object(
+                smooth_animation,
+                "MotorBusServer",
+                return_value=fake_motor_bus,
+            ), patch.object(
+                smooth_animation,
+                "build_realtime_model",
+                return_value="fake-llm",
+            ), patch.object(
+                smooth_animation,
+                "AgentSession",
+                return_value=FakeSession(),
+            ), patch.object(
+                smooth_animation,
+                "build_startup_reply_instructions",
+                return_value="灯灯醒了。",
+            ), patch.object(
+                smooth_animation.noise_cancellation,
+                "BVC",
+                return_value="fake-noise-cancellation",
+            ), patch.object(
+                smooth_animation,
+                "RoomInputOptions",
+                side_effect=lambda **kwargs: kwargs,
+            ):
+                await smooth_animation.entrypoint(fake_ctx)
+
+            self.assertEqual(motor_flags, [True])
+
+        asyncio.run(_exercise())
+
+    def test_smooth_animation_entrypoint_shuts_job_down_when_session_start_fails(self) -> None:
+        import smooth_animation
+
+        class FailingSession:
+            async def start(self, **kwargs) -> None:
+                raise RuntimeError("boom")
+
+            async def generate_reply(self, instructions=None) -> None:
+                return None
+
+        async def _exercise() -> None:
+            settings = SimpleNamespace(
+                model_provider="qwen",
+                glm_use_server_vad=False,
+                console_enable_apm=False,
+                console_speech_threshold_db=-48.0,
+                console_silence_duration_s=0.4,
+                console_min_speech_duration_s=0.25,
+                console_commit_cooldown_s=1.0,
+                console_start_trigger_s=0.18,
+                console_output_suppression_s=0.6,
+                console_auto_calibrate=False,
+                console_calibration_duration_s=1.6,
+                console_calibration_margin_db=8.0,
+                voice_state_path="/tmp/test-voice-state.json",
+                led_count=40,
+            )
+            fake_agent = SimpleNamespace(settings=settings, auto_expression_controller=None)
+            fake_ctx = SimpleNamespace(
+                room="test-room",
+                add_shutdown_callback=lambda callback: None,
+                shutdown=Mock(),
+            )
+            fake_memory_runtime = SimpleNamespace(
+                enabled=True,
+                set_motor_bus_enabled=lambda enabled: None,
+                close=lambda: None,
+            )
+
+            with patch.object(
+                smooth_animation,
+                "load_runtime_settings",
+                return_value=settings,
+            ), patch.object(
+                smooth_animation,
+                "bootstrap_agent_runtime",
+                return_value=fake_memory_runtime,
+            ), patch.object(
+                smooth_animation,
+                "LeLamp",
+                return_value=fake_agent,
+            ), patch.object(
+                smooth_animation,
+                "build_realtime_model",
+                return_value="fake-llm",
+            ), patch.object(
+                smooth_animation,
+                "AgentSession",
+                return_value=FailingSession(),
+            ), patch.object(
+                smooth_animation,
+                "build_startup_reply_instructions",
+                return_value="灯灯醒了。",
+            ), patch.object(
+                smooth_animation.noise_cancellation,
+                "BVC",
+                return_value="fake-noise-cancellation",
+            ), patch.object(
+                smooth_animation,
+                "RoomInputOptions",
+                side_effect=lambda **kwargs: kwargs,
+            ):
+                with self.assertRaises(RuntimeError):
+                    await smooth_animation.entrypoint(fake_ctx)
+
+            fake_ctx.shutdown.assert_called_once()
+
+        asyncio.run(_exercise())
+
     def test_smooth_animation_entrypoint_installs_console_patch_for_qwen(self) -> None:
         import smooth_animation
 
@@ -45,9 +400,20 @@ class QwenRealtimeTests(unittest.TestCase):
                 console_calibration_duration_s=1.6,
                 console_calibration_margin_db=8.0,
                 voice_state_path="/tmp/test-voice-state.json",
+                led_count=40,
             )
-            fake_agent = SimpleNamespace(settings=settings)
-            fake_ctx = SimpleNamespace(room="test-room")
+            fake_agent = SimpleNamespace(
+                settings=settings,
+                animation_service="fake-animation-service",
+                animation_service_error=None,
+                rgb_service="fake-rgb-service",
+                auto_expression_controller=None,
+            )
+            fake_ctx = SimpleNamespace(
+                room="test-room",
+                add_shutdown_callback=lambda callback: None,
+                shutdown=Mock(),
+            )
 
             with patch.object(smooth_animation, "LeLamp", return_value=fake_agent), patch.object(
                 smooth_animation,

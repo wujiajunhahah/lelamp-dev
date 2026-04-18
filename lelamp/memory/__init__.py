@@ -25,6 +25,7 @@ from .ids import (
     is_manual_session,
 )
 from .reader import build_memory_header
+from .runtime import AgentMemoryRuntime, bootstrap_agent_runtime
 from .root import (
     DEFAULT_USER_ID,
     ensure_user_memory_root,
@@ -35,10 +36,12 @@ from .root import (
 
 __all__ = [
     "AGENT_SESSION_PREFIX",
+    "AgentMemoryRuntime",
     "DEFAULT_USER_ID",
     "MANUAL_SESSION_PREFIX",
     "SESSION_ID_RE",
     "build_memory_header",
+    "bootstrap_agent_runtime",
     "ensure_user_memory_root",
     "generate_event_id",
     "generate_invoke_id",
