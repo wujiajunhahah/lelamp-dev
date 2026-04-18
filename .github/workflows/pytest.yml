@@ -30,7 +30,4 @@ jobs:
         run: uv sync --dev
 
       - name: Run pytest
-        run: |
-          PYTHONPATH=. uv run --with pytest python -m pytest -q lelamp/test \
-            --ignore=lelamp/test/test_motors.py \
-            --ignore=lelamp/test/test_rgb.py
+        run: PYTHONPATH=. uv run --with pytest python -m pytest -q lelamp/test
