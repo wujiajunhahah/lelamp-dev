@@ -176,11 +176,11 @@ class TestFallbackExpression:
         record = writer.write_fallback_expression(
             session_id=_agent_session(),
             source="auto_expression",
-            style="shy",
+            style="curious",
             trigger="voice_silence_timeout",
             linked_conversation_event_id="aa" * 16,
         )
-        assert record["payload"]["style"] == "shy"
+        assert record["payload"]["style"] == "curious"
         assert record["payload"]["linked_conversation_event_id"] == "aa" * 16
 
     def test_rejects_empty_style(self, writer):
@@ -189,6 +189,15 @@ class TestFallbackExpression:
                 session_id=_agent_session(),
                 source="auto_expression",
                 style="",
+                trigger="voice_silence_timeout",
+            )
+
+    def test_rejects_unknown_expression_style(self, writer):
+        with pytest.raises(MemoryWriteError, match="fallback style"):
+            writer.write_fallback_expression(
+                session_id=_agent_session(),
+                source="auto_expression",
+                style="bogus",
                 trigger="voice_silence_timeout",
             )
 
@@ -340,3 +349,26 @@ class TestIterEvents:
         path.write_text("".join(lines), encoding="utf-8")
         with pytest.raises(MemoryWriteError, match="malformed non-trailing"):
             list(writer.iter_events())
+
+    def test_repairs_missing_newline_before_next_append(self, writer, user_dir):
+        sid = _agent_session()
+        writer.write_conversation(
+            session_id=sid,
+            source="voice_agent",
+            user_text="first",
+            assistant_text="first",
+        )
+        path = user_dir / "events.jsonl"
+        raw = path.read_bytes()
+        assert raw.endswith(b"\n")
+        path.write_bytes(raw[:-1])
+
+        writer.write_conversation(
+            session_id=sid,
+            source="voice_agent",
+            user_text="second",
+            assistant_text="second",
+        )
+
+        rows = list(writer.iter_events())
+        assert [row["payload"]["user_text"] for row in rows] == ["first", "second"]

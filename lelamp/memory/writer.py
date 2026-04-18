@@ -27,6 +27,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Optional
 
+from lelamp.expression_engine import EXPRESSION_STYLE_CHOICES
+
 from . import ids as _ids
 from .root import DEFAULT_USER_ID, ensure_user_memory_root, resolve_user_id
 
@@ -51,6 +53,7 @@ CONVERSATION_STYLES = {"excited", "caring", "worried", "sad"}
 
 FUNCTION_TOOL_PHASES = {"invoke", "result"}
 FUNCTION_TOOL_CALLERS = {"llm", "auto_expression"}
+FALLBACK_EXPRESSION_STYLES = frozenset(EXPRESSION_STYLE_CHOICES)
 
 PLAYBACK_ACTIONS = {
     "play",
@@ -241,13 +244,13 @@ class MemoryWriter:
         ts_ms: Optional[int] = None,
         event_id: Optional[str] = None,
     ) -> dict[str, Any]:
-        # Style whitelist mirrors ``voice_profile.py``; the schema
-        # allows the fallback enum to drift independently of the
-        # conversation enum if the auto-expression controller ever
-        # gains a new style, so we accept any non-empty string here
-        # and let the writer log a warning for out-of-set values.
         if not style or not isinstance(style, str):
             raise MemoryWriteError(f"invalid fallback style={style!r}")
+        if style not in FALLBACK_EXPRESSION_STYLES:
+            raise MemoryWriteError(
+                f"invalid fallback style={style!r}; "
+                f"must be one of {sorted(FALLBACK_EXPRESSION_STYLES)}"
+            )
         payload = {
             "payload_version": 1,
             "style": style,
@@ -406,10 +409,13 @@ class MemoryWriter:
         with self._locked():
             fd = os.open(
                 self._events_path,
-                os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+                os.O_RDWR | os.O_CREAT | os.O_APPEND,
                 _FILE_MODE,
             )
             try:
+                file_size = os.fstat(fd).st_size
+                if file_size > 0 and os.pread(fd, 1, file_size - 1) != b"\n":
+                    os.write(fd, b"\n")
                 os.write(fd, data)
                 os.fsync(fd)
             finally:
