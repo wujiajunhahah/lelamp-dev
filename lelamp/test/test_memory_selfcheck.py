@@ -180,6 +180,36 @@ class TestRecentIndex:
         assert report.summaries_backfilled == []
         assert report.recent_index_rebuilt is False
 
+    def test_corrupt_events_do_not_abort_selfcheck(self, writer):
+        handle = memsession.start_agent_session(
+            writer, now=datetime(2026, 4, 17, 9, 0, 0, tzinfo=timezone.utc)
+        )
+        writer.write_conversation(
+            session_id=handle.session_id,
+            source="voice_agent",
+            user_text="u",
+            assistant_text="a",
+            assistant_style="caring",
+        )
+        writer.write_conversation(
+            session_id=handle.session_id,
+            source="voice_agent",
+            user_text="u2",
+            assistant_text="a2",
+            assistant_style="caring",
+        )
+        _kill_pid_in_meta(handle.meta_path)
+
+        path = writer.events_path
+        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+        lines[0] = "not valid json\n"
+        path.write_text("".join(lines), encoding="utf-8")
+
+        report = memselfcheck.run_selfcheck(writer)
+        assert report.summaries_backfilled == []
+        assert report.recent_index_rebuilt is False
+        assert not memidx.recent_index_path(writer).exists()
+
 
 class TestSessionHandleClose:
     def test_owner_close_writes_summary_and_index(self, writer):

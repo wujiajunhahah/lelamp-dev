@@ -105,7 +105,7 @@ def _full_agent_fixture(writer, handle):
     writer.write_fallback_expression(
         session_id=handle.session_id,
         source="auto_expression",
-        style="shy",
+        style="curious",
         trigger="voice_silence_timeout",
         ts_ms=1_700_000_004_000,
     )

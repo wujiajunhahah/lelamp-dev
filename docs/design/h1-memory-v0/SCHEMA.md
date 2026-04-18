@@ -130,7 +130,7 @@ agent LLM 调用的 function tool（`express`、`play_recording`、`set_rgb_soli
 ```json
 {
   "payload_version": 1,
-  "style": "shy",                      
+  "style": "curious",                  
   "trigger": "voice_silence_timeout",  
   "linked_conversation_event_id": "01JR5K..."
 }
@@ -180,7 +180,7 @@ agent LLM 调用的 function tool（`express`、`play_recording`、`set_rgb_soli
 |---|---|
 | LLM 调 `play_recording("curious")` | `function_tool(invoke) + function_tool(result)`，**不**写 playback |
 | LLM 调 `set_rgb_solid(...)` | `function_tool(invoke) + function_tool(result)`，**不**写 playback |
-| AutoExpression 兜底调 `express("shy")` | `fallback_expression + function_tool(invoke) + function_tool(result)`，**不**写 playback |
+| AutoExpression 兜底调 `express("curious")` | `fallback_expression + function_tool(invoke) + function_tool(result)`，**不**写 playback |
 | Dashboard 按钮点"play curious" | `playback(initiator=dashboard)` |
 | `python -m lelamp.remote_control play curious` | `playback(initiator=remote_control)` |
 

@@ -115,7 +115,7 @@ class TestAgentAggregation:
             writer.write_fallback_expression(
                 session_id=sid,
                 source="auto_expression",
-                style="shy",
+                style="curious",
                 trigger="voice_silence_timeout",
             )
         summary = compute_summary(writer, sid)

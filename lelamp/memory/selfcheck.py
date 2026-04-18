@@ -134,7 +134,17 @@ def run_selfcheck(writer: MemoryWriter) -> SelfCheckReport:
         if stale or report.summaries_backfilled:
             if report.summaries_backfilled and not stale:
                 reason = "summaries_backfilled"
-            rebuild_recent_index(writer)
-            report.recent_index_rebuilt = True
-            report.stale_reason = reason
+            try:
+                rebuild_recent_index(writer)
+            except Exception:  # pragma: no cover - defensive corruption guard
+                report.stale_reason = (
+                    f"{reason}; rebuild_failed" if reason else "rebuild_failed"
+                )
+                _logger.exception(
+                    "memory self-check: failed to rebuild recent_index",
+                    extra={"reason": reason},
+                )
+            else:
+                report.recent_index_rebuilt = True
+                report.stale_reason = reason
     return report
