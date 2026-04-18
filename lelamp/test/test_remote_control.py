@@ -44,6 +44,7 @@ class _LiveServer:
             log_level="warning",
             lifespan="off",
             access_log=False,
+            ws="none",
         )
         self._server = uvicorn.Server(config)
         self._thread = threading.Thread(target=self._server.run, daemon=True)

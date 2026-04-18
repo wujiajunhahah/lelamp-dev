@@ -3,6 +3,7 @@ import socket
 import threading
 import time
 import unittest
+import warnings
 from contextlib import closing
 from pathlib import Path
 from typing import Any
@@ -71,6 +72,7 @@ class _LiveServer:
             log_level="warning",
             lifespan="off",
             access_log=False,
+            ws="none",
         )
         self._server = uvicorn.Server(config)
         self._thread = threading.Thread(target=self._server.run, daemon=True)
@@ -90,6 +92,30 @@ class _LiveServer:
 
 
 class ProxyAnimationServiceTests(unittest.TestCase):
+    def test_dispatch_play_server_boot_does_not_emit_websockets_deprecation(self) -> None:
+        animation = _FakeAnimation()
+        app = build_app(
+            animation_service=animation,
+            get_animation_service_error=lambda: None,
+            rgb_service=None,
+            led_count=40,
+        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with _LiveServer(app) as srv:
+                proxy = client_mod.ProxyAnimationService(srv.base_url)
+                proxy.dispatch("play", "wake_up")
+
+        self.assertEqual(animation.dispatched, [("play", "wake_up")])
+        self.assertFalse(
+            [
+                warning
+                for warning in caught
+                if issubclass(warning.category, DeprecationWarning)
+                and "websockets" in str(warning.message)
+            ]
+        )
+
     def test_dispatch_play_hits_server(self) -> None:
         animation = _FakeAnimation()
         app = build_app(
