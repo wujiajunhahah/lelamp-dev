@@ -317,6 +317,33 @@ class TestManualFiltering:
         # But agent conversation must surface.
         assert "agent hello" in header
 
+    def test_degraded_recent_turns_only_include_last_three_agent_sessions(self, writer, user_dir):
+        prompts = []
+        for hour in range(1, 5):
+            agent = _seed_agent_session(writer, hour=hour, minute=0, second=0)
+            text = f"agent hour {hour}"
+            writer.write_conversation(
+                session_id=agent.session_id,
+                source="voice_agent",
+                user_text=text,
+                assistant_text="ok",
+                assistant_style="caring",
+                ts_ms=1_700_000_000_000 + hour,
+            )
+            agent.close(end_ts_ms=1_700_000_100_000 + hour)
+            prompts.append(text)
+
+        (user_dir / "recent_index.json").unlink()
+
+        header = build_memory_header(
+            now=datetime(2026, 4, 18, 0, 0, 0, tzinfo=timezone.utc),
+        )
+
+        assert prompts[0] not in header
+        assert prompts[1] in header
+        assert prompts[2] in header
+        assert prompts[3] in header
+
 
 class TestSynthesizedRecap:
     def test_recap_uses_stats_when_narrative_null(self, writer, user_dir):

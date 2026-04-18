@@ -88,6 +88,27 @@ def _git_ref(cwd: Optional[Path] = None) -> Optional[str]:
     return ref or None
 
 
+def _repo_root_hint() -> Optional[Path]:
+    """Best-effort repo root for default ``git_ref`` capture.
+
+    The memory store lives under ``$HOME/.lelamp/...`` and is often
+    outside the git checkout, so using ``writer.user_dir`` as ``cwd``
+    makes ``git_ref`` silently fall back to ``None``.  Prefer the
+    source tree containing this module; if that is not a checkout,
+    fall back to searching upward from the current working directory.
+    """
+
+    seen: set[Path] = set()
+    for base in (Path(__file__).resolve().parent, Path.cwd()):
+        for candidate in (base, *base.parents):
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            if (candidate / ".git").exists():
+                return candidate
+    return None
+
+
 def _pid_alive(pid: int) -> bool:
     """Return ``True`` iff ``pid`` corresponds to a live process we can see.
 
@@ -227,7 +248,11 @@ def _write_meta_phase1_locked(
     start_iso = base_ts.astimezone().isoformat()
     tz_name = _local_timezone_name()
     pid = None if is_manual else (pid_override if pid_override is not None else os.getpid())
-    git_ref = git_ref_override if git_ref_override is not None else _git_ref(cwd=writer.user_dir.parent)
+    git_ref = (
+        git_ref_override
+        if git_ref_override is not None
+        else _git_ref(cwd=_repo_root_hint())
+    )
 
     meta = _build_phase1_meta(
         session_id=session_id,

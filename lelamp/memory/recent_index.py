@@ -69,8 +69,66 @@ def _collect_agent_summary_entries(writer: MemoryWriter) -> list[dict[str, Any]]
     return refs
 
 
-def _collect_event_tail_refs(writer: MemoryWriter) -> list[dict[str, Any]]:
-    """Return the last ``RECENT_EVENT_TAIL_LIMIT`` non-manual event refs.
+def _summary_session_ids(refs: list[dict[str, Any]]) -> set[str]:
+    session_ids: set[str] = set()
+    for ref in refs:
+        session_id = ref.get("session_id")
+        if isinstance(session_id, str):
+            session_ids.add(session_id)
+    return session_ids
+
+
+def _recent_window_session_ids(
+    writer: MemoryWriter,
+    summary_refs: list[dict[str, Any]],
+) -> set[str]:
+    """Return session ids for the current recent window.
+
+    Prefer the newest three agent summaries, but when fewer than
+    three summaries exist yet (for example an in-flight agent session
+    whose summary is only written at close), pad from newest agent
+    ``*.meta.json`` files so ``event_tail_refs`` still reflects the
+    latest agent context.
+    """
+
+    session_ids = _summary_session_ids(summary_refs)
+    if len(session_ids) >= RECENT_SESSION_LIMIT:
+        return session_ids
+
+    sessions_dir = writer.user_dir / "sessions"
+    if not sessions_dir.exists():
+        return session_ids
+
+    candidates: list[tuple[int, str]] = []
+    for path in sessions_dir.glob("*.meta.json"):
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                meta = json.load(fh)
+        except (OSError, json.JSONDecodeError) as exc:
+            _logger.warning("skipping unreadable meta %s: %s", path, exc)
+            continue
+        session_id = meta.get("session_id")
+        if not isinstance(session_id, str):
+            continue
+        if _ids.is_manual_session(session_id):
+            continue
+        start_ts_ms = int(meta.get("start_ts_ms") or 0)
+        candidates.append((start_ts_ms, session_id))
+
+    candidates.sort(reverse=True)
+    for _, session_id in candidates:
+        session_ids.add(session_id)
+        if len(session_ids) >= RECENT_SESSION_LIMIT:
+            break
+    return session_ids
+
+
+def _collect_event_tail_refs(
+    writer: MemoryWriter,
+    *,
+    session_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Return the last ``RECENT_EVENT_TAIL_LIMIT`` refs from the recent window.
 
     The projection is intentionally minimal (``event_id`` /
     ``kind`` / ``ts_ms``): the prompt builder opens the full
@@ -78,12 +136,17 @@ def _collect_event_tail_refs(writer: MemoryWriter) -> list[dict[str, Any]]:
     index tiny means recent_index rebuilds stay ~1 ms on the Pi.
     """
 
+    if not session_ids:
+        return []
+
     tail: deque[dict[str, Any]] = deque(maxlen=RECENT_EVENT_TAIL_LIMIT)
     for event in writer.iter_events():
         session_id = event.get("session_id")
         if not isinstance(session_id, str):
             continue
         if _ids.is_manual_session(session_id):
+            continue
+        if session_id not in session_ids:
             continue
         ev_id = event.get("event_id")
         kind = event.get("kind")
@@ -99,11 +162,16 @@ def _collect_event_tail_refs(writer: MemoryWriter) -> list[dict[str, Any]]:
 def build_recent_index(writer: MemoryWriter) -> dict[str, Any]:
     """Compute the index payload without touching disk (test seam)."""
 
+    sessions = _collect_agent_summary_entries(writer)
+    session_ids = _recent_window_session_ids(writer, sessions)
     return {
         "schema": RECENT_INDEX_SCHEMA,
         "built_at_ms": _ids.current_timestamp_ms(),
-        "sessions": _collect_agent_summary_entries(writer),
-        "event_tail_refs": _collect_event_tail_refs(writer),
+        "sessions": sessions,
+        "event_tail_refs": _collect_event_tail_refs(
+            writer,
+            session_ids=session_ids,
+        ),
     }
 
 

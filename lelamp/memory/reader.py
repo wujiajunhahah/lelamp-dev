@@ -35,7 +35,11 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from . import ids as _ids
-from .recent_index import RECENT_SESSION_LIMIT, recent_index_path
+from .recent_index import (
+    RECENT_EVENT_TAIL_LIMIT,
+    RECENT_SESSION_LIMIT,
+    recent_index_path,
+)
 from .root import memory_root, resolve_user_id, user_memory_root
 
 _logger = logging.getLogger(__name__)
@@ -226,7 +230,31 @@ def _load_summaries_degraded(user_dir: Path) -> list[dict[str, Any]]:
 
 
 def _read_recent_events(events_path: Path, *, limit: int = 200) -> list[dict[str, Any]]:
-    """Return the last ``limit`` non-manual events, crash-tail tolerant."""
+    """Return the last ``limit`` eligible events, crash-tail tolerant."""
+
+    return _scan_recent_events(
+        events_path,
+        limit=limit,
+        allowed_session_ids=None,
+        allowed_event_ids=None,
+    )
+
+
+def _scan_recent_events(
+    events_path: Path,
+    *,
+    limit: int,
+    allowed_session_ids: Optional[set[str]],
+    allowed_event_ids: Optional[set[str]],
+) -> list[dict[str, Any]]:
+    """Tail-scan ``events.jsonl`` without ever writing to disk.
+
+    ``allowed_session_ids`` enforces the "recent 3 agent sessions"
+    half of the recent-window contract.  ``allowed_event_ids`` lets
+    the normal tier honor ``recent_index.json:event_tail_refs`` at
+    face value while degraded tier can omit it and derive the same
+    window directly from summaries + raw events.
+    """
 
     if not events_path.exists():
         return []
@@ -252,10 +280,51 @@ def _read_recent_events(events_path: Path, *, limit: int = 200) -> list[dict[str
         if not isinstance(event, dict):
             continue
         session_id = event.get("session_id")
-        if isinstance(session_id, str) and _ids.is_manual_session(session_id):
+        if not isinstance(session_id, str):
             continue
+        if _ids.is_manual_session(session_id):
+            continue
+        if allowed_session_ids is not None and session_id not in allowed_session_ids:
+            continue
+        if allowed_event_ids is not None:
+            event_id = event.get("event_id")
+            if not isinstance(event_id, str) or event_id not in allowed_event_ids:
+                continue
         buffered.append(event)
     return buffered[-limit:]
+
+
+def _summary_session_ids(summaries: Sequence[Mapping[str, Any]]) -> set[str]:
+    session_ids: set[str] = set()
+    for summary in summaries:
+        session_id = summary.get("session_id")
+        if isinstance(session_id, str) and not _ids.is_manual_session(session_id):
+            session_ids.add(session_id)
+    return session_ids
+
+
+def _load_recent_events_via_index(
+    events_path: Path,
+    idx: Mapping[str, Any],
+    *,
+    session_ids: set[str],
+) -> list[dict[str, Any]]:
+    refs = idx.get("event_tail_refs") or []
+    event_ids: set[str] = set()
+    for ref in refs:
+        if not isinstance(ref, Mapping):
+            continue
+        event_id = ref.get("event_id")
+        if isinstance(event_id, str):
+            event_ids.add(event_id)
+    if not event_ids or not session_ids:
+        return []
+    return _scan_recent_events(
+        events_path,
+        limit=RECENT_EVENT_TAIL_LIMIT,
+        allowed_session_ids=session_ids,
+        allowed_event_ids=event_ids,
+    )
 
 
 def _collect_state(user_dir: Path) -> _ReaderState:
@@ -273,7 +342,20 @@ def _collect_state(user_dir: Path) -> _ReaderState:
         # could, in principle, exist -- but PROMPT_INTEGRATION says
         # fallback returns the unavailable marker with nothing else.
         return _ReaderState(tier="fallback", profile=profile, summaries=[], recent_events=[])
-    events = _read_recent_events(events_path)
+    session_ids = _summary_session_ids(summaries)
+    if idx is not None:
+        events = _load_recent_events_via_index(
+            events_path,
+            idx,
+            session_ids=session_ids,
+        )
+    else:
+        events = _scan_recent_events(
+            events_path,
+            limit=RECENT_EVENT_TAIL_LIMIT,
+            allowed_session_ids=session_ids,
+            allowed_event_ids=None,
+        )
     return _ReaderState(tier=tier, profile=profile, summaries=summaries, recent_events=events)
 
 

@@ -135,6 +135,27 @@ class TestEventTailRefs:
         assert len(refs) == 1
         assert refs[0]["kind"] == "conversation"
 
+    def test_event_tail_only_keeps_events_from_last_three_agent_sessions(self, writer):
+        written_ids = []
+        for hour in range(1, 5):
+            handle = _agent_session(writer, hour=hour)
+            event = writer.write_conversation(
+                session_id=handle.session_id,
+                source="voice_agent",
+                user_text=f"u{hour}",
+                assistant_text=f"a{hour}",
+                assistant_style="caring",
+                ts_ms=1_000_000 + hour,
+            )
+            memsummary.compute_and_write_summary(writer, handle.session_id)
+            written_ids.append(event["event_id"])
+
+        refs = build_recent_index(writer)["event_tail_refs"]
+        ref_ids = [ref["event_id"] for ref in refs]
+
+        assert written_ids[0] not in ref_ids
+        assert ref_ids == written_ids[1:]
+
     def test_caps_at_200_most_recent(self, writer):
         h = _agent_session(writer, hour=1)
         for i in range(RECENT_EVENT_TAIL_LIMIT + 50):

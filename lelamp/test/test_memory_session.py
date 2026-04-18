@@ -73,6 +73,21 @@ class TestStartAgentSession:
         meta = json.loads(handle.meta_path.read_text(encoding="utf-8"))
         assert meta["flags"]["motor_bus_enabled"] is None
 
+    def test_phase1_resolves_git_ref_from_repo_root_not_memory_dir(self, writer, monkeypatch):
+        seen = {}
+
+        def fake_git_ref(cwd=None):
+            seen["cwd"] = cwd
+            return "abc1234"
+
+        monkeypatch.setattr(memsession, "_git_ref", fake_git_ref)
+
+        handle = start_agent_session(writer, now=_fixed_ts())
+        meta = json.loads(handle.meta_path.read_text(encoding="utf-8"))
+
+        assert seen["cwd"] == Path(__file__).resolve().parents[2]
+        assert meta["git_ref"] == "abc1234"
+
     def test_collision_suffix_appended(self, writer):
         ts = _fixed_ts()
         h1 = start_agent_session(writer, now=ts)
