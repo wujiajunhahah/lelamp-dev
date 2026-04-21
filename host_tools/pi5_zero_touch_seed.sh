@@ -89,14 +89,11 @@ need_cmd() {
   command -v "$cmd" >/dev/null 2>&1 || die "Required command not found: ${cmd}"
 }
 
-shell_escape() {
-  printf '%q' "$1"
-}
-
 emit_env_kv() {
   local key="$1"
   local value="$2"
-  printf '%s=%s\n' "$key" "$(shell_escape "$value")"
+  [[ "$value" == *$'\n'* ]] && die "Bootstrap value for ${key} must not contain newlines"
+  printf '%s=%s\n' "$key" "$value"
 }
 
 list_external_disks_hint() {
@@ -335,12 +332,40 @@ if [[ ! -f "$BOOTSTRAP_ENV" ]]; then
   exit 1
 fi
 
-# shellcheck disable=SC1090
-. "$BOOTSTRAP_ENV"
+load_bootstrap_env() {
+  local path="$1"
+  local line key value
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
+    [[ "$line" == \#* ]] && continue
+    [[ "$line" == *=* ]] || {
+      echo "Invalid bootstrap config line: ${line}" >&2
+      exit 1
+    }
+
+    key="${line%%=*}"
+    value="${line#*=}"
+
+    case "$key" in
+      BOOTSTRAP_HOSTNAME|BOOTSTRAP_USER|BOOTSTRAP_WIFI_SSID|BOOTSTRAP_WIFI_PASSWORD|BOOTSTRAP_WIFI_COUNTRY|BOOTSTRAP_WIFI_UUID|BOOTSTRAP_REPO_URL|BOOTSTRAP_REPO_BRANCH|BOOTSTRAP_REPO_DIR|BOOTSTRAP_NETWORK_TEST_URLS|BOOTSTRAP_NETWORK_WAIT_ATTEMPTS|BOOTSTRAP_REPO_WAIT_ATTEMPTS|AUTO_ACCEPT_DEFAULTS|AUTO_REBOOT|LAMP_ID|LAMP_PORT|MODE_SCRIPT|MODEL_PROVIDER|MODEL_API_KEY|MODEL_BASE_URL|MODEL_NAME|MODEL_VOICE|RESPEAKER_VARIANT|INSTALL_LELAMP_SERVICE|INSTALL_OPENCLAW|OPENCLAW_INSTALL_MODE|INSTALL_TAILSCALE|RUN_OPENCLAW_ONBOARD|RUN_DOWNLOAD_FILES_POSTBOOT|LIVEKIT_URL|LIVEKIT_API_KEY|LIVEKIT_API_SECRET)
+        printf -v "$key" '%s' "$value"
+        export "$key"
+        ;;
+      *)
+        echo "Unexpected bootstrap config key: ${key}" >&2
+        exit 1
+        ;;
+    esac
+  done <"$path"
+}
+
+load_bootstrap_env "$BOOTSTRAP_ENV"
 
 mkdir -p "$SYSTEM_BOOTSTRAP_DIR"
 cp "$BOOTSTRAP_ENV" "$SYSTEM_BOOTSTRAP_ENV"
 chmod 600 "$SYSTEM_BOOTSTRAP_ENV"
+rm -f "$BOOTSTRAP_ENV"
 
 if [[ -n "${BOOTSTRAP_HOSTNAME:-}" ]]; then
   hostnamectl set-hostname "$BOOTSTRAP_HOSTNAME"
@@ -386,6 +411,7 @@ if [[ -f "$AUTHORIZED_KEYS_STAGING" ]] && id "${BOOTSTRAP_USER}" >/dev/null 2>&1
   USER_HOME="$(getent passwd "${BOOTSTRAP_USER}" | cut -d: -f6)"
   install -d -m 700 -o "${BOOTSTRAP_USER}" -g "${BOOTSTRAP_USER}" "${USER_HOME}/.ssh"
   install -m 600 -o "${BOOTSTRAP_USER}" -g "${BOOTSTRAP_USER}" "$AUTHORIZED_KEYS_STAGING" "${USER_HOME}/.ssh/authorized_keys"
+  rm -f "$AUTHORIZED_KEYS_STAGING"
 fi
 
 cat >"$BOOTSTRAP_SCRIPT" <<'SCRIPTEOF'
@@ -401,8 +427,35 @@ if [[ -f "$DONE_MARKER" ]]; then
   exit 0
 fi
 
-# shellcheck disable=SC1090
-. "$BOOTSTRAP_ENV"
+load_bootstrap_env() {
+  local path="$1"
+  local line key value
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
+    [[ "$line" == \#* ]] && continue
+    [[ "$line" == *=* ]] || {
+      echo "Invalid bootstrap config line: ${line}" >&2
+      exit 1
+    }
+
+    key="${line%%=*}"
+    value="${line#*=}"
+
+    case "$key" in
+      BOOTSTRAP_HOSTNAME|BOOTSTRAP_USER|BOOTSTRAP_WIFI_SSID|BOOTSTRAP_WIFI_PASSWORD|BOOTSTRAP_WIFI_COUNTRY|BOOTSTRAP_WIFI_UUID|BOOTSTRAP_REPO_URL|BOOTSTRAP_REPO_BRANCH|BOOTSTRAP_REPO_DIR|BOOTSTRAP_NETWORK_TEST_URLS|BOOTSTRAP_NETWORK_WAIT_ATTEMPTS|BOOTSTRAP_REPO_WAIT_ATTEMPTS|AUTO_ACCEPT_DEFAULTS|AUTO_REBOOT|LAMP_ID|LAMP_PORT|MODE_SCRIPT|MODEL_PROVIDER|MODEL_API_KEY|MODEL_BASE_URL|MODEL_NAME|MODEL_VOICE|RESPEAKER_VARIANT|INSTALL_LELAMP_SERVICE|INSTALL_OPENCLAW|OPENCLAW_INSTALL_MODE|INSTALL_TAILSCALE|RUN_OPENCLAW_ONBOARD|RUN_DOWNLOAD_FILES_POSTBOOT|LIVEKIT_URL|LIVEKIT_API_KEY|LIVEKIT_API_SECRET)
+        printf -v "$key" '%s' "$value"
+        export "$key"
+        ;;
+      *)
+        echo "Unexpected bootstrap config key: ${key}" >&2
+        exit 1
+        ;;
+    esac
+  done <"$path"
+}
+
+load_bootstrap_env "$BOOTSTRAP_ENV"
 
 touch "$LOG_FILE"
 chmod 644 "$LOG_FILE"
@@ -491,16 +544,16 @@ USER_HOME="$(getent passwd "${BOOTSTRAP_USER}" | cut -d: -f6)"
 REPO_TARGET="${USER_HOME}/${BOOTSTRAP_REPO_DIR}"
 
 if [[ -d "${REPO_TARGET}/.git" ]]; then
-  su - "${BOOTSTRAP_USER}" -c "git -C '${REPO_TARGET}' fetch --all --prune"
-  su - "${BOOTSTRAP_USER}" -c "git -C '${REPO_TARGET}' checkout '${BOOTSTRAP_REPO_BRANCH}'"
-  su - "${BOOTSTRAP_USER}" -c "git -C '${REPO_TARGET}' pull --ff-only origin '${BOOTSTRAP_REPO_BRANCH}'"
+  sudo -H -u "${BOOTSTRAP_USER}" -- git -C "${REPO_TARGET}" fetch --all --prune
+  sudo -H -u "${BOOTSTRAP_USER}" -- git -C "${REPO_TARGET}" checkout "${BOOTSTRAP_REPO_BRANCH}"
+  sudo -H -u "${BOOTSTRAP_USER}" -- git -C "${REPO_TARGET}" pull --ff-only origin "${BOOTSTRAP_REPO_BRANCH}"
 else
   rm -rf "${REPO_TARGET}"
-  su - "${BOOTSTRAP_USER}" -c "git clone --branch '${BOOTSTRAP_REPO_BRANCH}' --depth 1 --recurse-submodules '${BOOTSTRAP_REPO_URL}' '${REPO_TARGET}'"
+  sudo -H -u "${BOOTSTRAP_USER}" -- git clone --branch "${BOOTSTRAP_REPO_BRANCH}" --depth 1 --recurse-submodules "${BOOTSTRAP_REPO_URL}" "${REPO_TARGET}"
 fi
 
-su - "${BOOTSTRAP_USER}" -c "git -C '${REPO_TARGET}' submodule sync --recursive"
-su - "${BOOTSTRAP_USER}" -c "git -C '${REPO_TARGET}' submodule update --init --recursive"
+sudo -H -u "${BOOTSTRAP_USER}" -- git -C "${REPO_TARGET}" submodule sync --recursive
+sudo -H -u "${BOOTSTRAP_USER}" -- git -C "${REPO_TARGET}" submodule update --init --recursive
 
 cd "${REPO_TARGET}/lelamp_runtime"
 
@@ -512,31 +565,31 @@ chmod +x \
   scripts/pi5_post_reboot_finalize.sh \
   scripts/lelamp_doctor.sh
 
-su - "${BOOTSTRAP_USER}" -c "
-  export AUTO_ACCEPT_DEFAULTS='${AUTO_ACCEPT_DEFAULTS}'
-  export AUTO_REBOOT='${AUTO_REBOOT}'
-  export LAMP_ID='${LAMP_ID}'
-  export LAMP_PORT='${LAMP_PORT}'
-  export MODE_SCRIPT='${MODE_SCRIPT}'
-  export MODEL_PROVIDER='${MODEL_PROVIDER}'
-  export MODEL_API_KEY='${MODEL_API_KEY}'
-  export MODEL_BASE_URL='${MODEL_BASE_URL}'
-  export MODEL_NAME='${MODEL_NAME}'
-  export MODEL_VOICE='${MODEL_VOICE}'
-  export RESPEAKER_VARIANT='${RESPEAKER_VARIANT}'
-  export INSTALL_LELAMP_SERVICE='${INSTALL_LELAMP_SERVICE}'
-  export INSTALL_OPENCLAW='${INSTALL_OPENCLAW}'
-  export OPENCLAW_INSTALL_MODE='${OPENCLAW_INSTALL_MODE}'
-  export INSTALL_TAILSCALE='${INSTALL_TAILSCALE}'
-  export RUN_OPENCLAW_ONBOARD='${RUN_OPENCLAW_ONBOARD}'
-  export RUN_DOWNLOAD_FILES_POSTBOOT='${RUN_DOWNLOAD_FILES_POSTBOOT}'
-  export LIVEKIT_URL='${LIVEKIT_URL}'
-  export LIVEKIT_API_KEY='${LIVEKIT_API_KEY}'
-  export LIVEKIT_API_SECRET='${LIVEKIT_API_SECRET}'
-  cd '${REPO_TARGET}/lelamp_runtime'
-  ./scripts/pi5_all_in_one.sh
-"
+sudo -H -u "${BOOTSTRAP_USER}" -- env \
+  AUTO_ACCEPT_DEFAULTS="${AUTO_ACCEPT_DEFAULTS}" \
+  AUTO_REBOOT="${AUTO_REBOOT}" \
+  LAMP_ID="${LAMP_ID}" \
+  LAMP_PORT="${LAMP_PORT}" \
+  MODE_SCRIPT="${MODE_SCRIPT}" \
+  MODEL_PROVIDER="${MODEL_PROVIDER}" \
+  MODEL_API_KEY="${MODEL_API_KEY}" \
+  MODEL_BASE_URL="${MODEL_BASE_URL}" \
+  MODEL_NAME="${MODEL_NAME}" \
+  MODEL_VOICE="${MODEL_VOICE}" \
+  RESPEAKER_VARIANT="${RESPEAKER_VARIANT}" \
+  INSTALL_LELAMP_SERVICE="${INSTALL_LELAMP_SERVICE}" \
+  INSTALL_OPENCLAW="${INSTALL_OPENCLAW}" \
+  OPENCLAW_INSTALL_MODE="${OPENCLAW_INSTALL_MODE}" \
+  INSTALL_TAILSCALE="${INSTALL_TAILSCALE}" \
+  RUN_OPENCLAW_ONBOARD="${RUN_OPENCLAW_ONBOARD}" \
+  RUN_DOWNLOAD_FILES_POSTBOOT="${RUN_DOWNLOAD_FILES_POSTBOOT}" \
+  LIVEKIT_URL="${LIVEKIT_URL}" \
+  LIVEKIT_API_KEY="${LIVEKIT_API_KEY}" \
+  LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET}" \
+  bash -lc 'cd "$1" && exec ./scripts/pi5_all_in_one.sh' bash "${REPO_TARGET}/lelamp_runtime"
 
+rm -f "$BOOTSTRAP_ENV"
+rm -f "$SYSTEM_BOOTSTRAP_ENV"
 touch "$DONE_MARKER"
 echo "==> $(date -u '+%Y-%m-%d %H:%M:%S UTC') zero-touch bootstrap finished"
 SCRIPTEOF
